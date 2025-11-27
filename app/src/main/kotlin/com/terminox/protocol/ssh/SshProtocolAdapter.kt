@@ -16,7 +16,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.apache.sshd.client.SshClient
 import org.apache.sshd.client.channel.ChannelShell
+import org.apache.sshd.client.config.hosts.HostConfigEntryResolver
+import org.apache.sshd.client.keyverifier.AcceptAllServerKeyVerifier
 import org.apache.sshd.client.session.ClientSession
+import org.apache.sshd.common.keyprovider.KeyIdentityProvider
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.KeyPair
@@ -38,8 +41,34 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
     override val protocolType = ProtocolType.SSH
 
     private val sshClient: SshClient by lazy {
-        SshClient.setUpDefaultClient().apply {
-            start()
+        // Create SSH client without default file-based configurations
+        // Android doesn't have a user home directory, so we must avoid
+        // any code paths that try to access ~/.ssh or similar
+        //
+        // We CANNOT use SshClient.setUpDefaultClient() because it statically
+        // initializes DefaultConfigFileHostEntryResolver which tries to access
+        // user.home system property that doesn't exist on Android.
+        //
+        // Instead, we create a minimal client and configure it manually.
+        createAndroidSshClient().also { client ->
+            client.start()
+        }
+    }
+
+    /**
+     * Creates an SSH client configured for Android (no filesystem access).
+     */
+    private fun createAndroidSshClient(): SshClient {
+        return SshClient().apply {
+            // Don't look for ~/.ssh/config
+            hostConfigEntryResolver = HostConfigEntryResolver.EMPTY
+
+            // Accept all server keys for now
+            // TODO: Implement proper host key verification with user prompts
+            serverKeyVerifier = AcceptAllServerKeyVerifier.INSTANCE
+
+            // Don't look for ~/.ssh/id_* key files
+            keyIdentityProvider = KeyIdentityProvider.EMPTY_KEYS_PROVIDER
         }
     }
 
