@@ -2,12 +2,13 @@ package com.terminox.presentation.terminal.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -16,7 +17,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
@@ -25,8 +25,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.terminox.protocol.terminal.CellStyle
 import com.terminox.protocol.terminal.TerminalColor
 import com.terminox.protocol.terminal.TerminalLine
 import com.terminox.protocol.terminal.TerminalState
@@ -35,14 +35,18 @@ import kotlinx.coroutines.delay
 /**
  * Custom Canvas-based terminal renderer.
  * Optimized for performance with monospace font rendering.
+ * Supports gestures for scrolling, zooming, and text selection.
  */
 @Composable
 fun TerminalCanvas(
     terminalState: TerminalState,
     modifier: Modifier = Modifier,
     fontSize: Float = 14f,
+    selection: TextSelection? = null,
+    scrollOffset: Int = 0,
     onSizeChanged: ((columns: Int, rows: Int) -> Unit)? = null,
-    onTap: (() -> Unit)? = null
+    onTap: (() -> Unit)? = null,
+    onGesture: ((TerminalGesture) -> Unit)? = null
 ) {
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
@@ -68,17 +72,34 @@ fun TerminalCanvas(
 
     // Track size and report column/row changes
     var lastReportedSize by remember { mutableStateOf(Pair(0, 0)) }
+    var screenWidth by remember { mutableFloatStateOf(0f) }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF1A1A2E))
-            .pointerInput(Unit) {
-                detectTapGestures {
-                    onTap?.invoke()
+            .terminalGestures(
+                screenWidth = screenWidth,
+                onGesture = { gesture ->
+                    when (gesture) {
+                        is TerminalGesture.Tap -> onTap?.invoke()
+                        else -> onGesture?.invoke(gesture)
+                    }
                 }
-            }
+            )
     ) {
+        screenWidth = constraints.maxWidth.toFloat()
+
+        // Selection overlay
+        if (selection != null && !selection.isEmpty()) {
+            SelectionOverlay(
+                selection = selection,
+                cellWidth = cellDimensions.width,
+                cellHeight = cellDimensions.height,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
         Canvas(modifier = Modifier.fillMaxSize()) {
             val canvasWidth = size.width
             val canvasHeight = size.height
@@ -119,6 +140,17 @@ fun TerminalCanvas(
                 )
             }
         }
+    }
+}
+
+/**
+ * Exports cell dimensions for external use.
+ */
+@Composable
+fun rememberCellDimensions(fontSize: Float): CellDimensions {
+    val textMeasurer = rememberTextMeasurer()
+    return remember(fontSize) {
+        calculateCellDimensions(textMeasurer, fontSize)
     }
 }
 
