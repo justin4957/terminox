@@ -26,8 +26,8 @@ import org.apache.sshd.common.kex.BuiltinDHFactories
 import org.apache.sshd.common.kex.extension.DefaultClientKexExtensionHandler
 import org.apache.sshd.common.keyprovider.KeyIdentityProvider
 import org.apache.sshd.common.mac.BuiltinMacs
+import org.apache.sshd.common.random.JceRandomFactory
 import org.apache.sshd.common.signature.BuiltinSignatures
-import org.apache.sshd.common.util.security.SecurityUtils
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.KeyPair
@@ -79,6 +79,9 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
             // Don't look for ~/.ssh/id_* key files
             keyIdentityProvider = KeyIdentityProvider.EMPTY_KEYS_PROVIDER
+
+            // Set up random number generator (required for crypto operations)
+            randomFactory = JceRandomFactory.INSTANCE
 
             // Configure cryptographic algorithms (normally done by setUpDefaultClient)
             // Use SecurityUtils to get the properly configured factories
