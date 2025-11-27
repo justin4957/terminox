@@ -67,6 +67,11 @@ class TerminalViewModel @Inject constructor(
     private val managedSessions = mutableMapOf<String, ManagedSession>()
     private var currentSession: ManagedSession? = null
 
+    // Track the last known terminal size from UI for proper PTY initialization
+    private var lastKnownColumns: Int = 80
+    private var lastKnownRows: Int = 24
+    private var pendingResizeAfterAuth: Boolean = false
+
     private val sshAdapter: SshProtocolAdapter by lazy {
         protocolFactory.getSshAdapter()
     }
@@ -149,10 +154,19 @@ class TerminalViewModel @Inject constructor(
 
             val session = currentSession ?: return@launch
 
-            val result = sshAdapter.authenticateWithPassword(session.session.sessionId, password)
+            // Use the last known terminal size when opening the shell channel
+            val result = sshAdapter.authenticateWithPassword(
+                session.session.sessionId,
+                password,
+                lastKnownColumns,
+                lastKnownRows
+            )
 
             result.fold(
                 onSuccess = {
+                    // Resize the emulator to match the actual terminal size
+                    session.emulator.resize(lastKnownColumns, lastKnownRows)
+
                     _uiState.update {
                         it.copy(
                             sessionState = SessionState.CONNECTED,
@@ -169,6 +183,9 @@ class TerminalViewModel @Inject constructor(
                     // Start collecting output
                     startOutputCollection(session.session.sessionId)
                     updateSessionList()
+
+                    // Mark that we need a resize if the UI reports a different size
+                    pendingResizeAfterAuth = true
                 },
                 onFailure = { error ->
                     _uiState.update {
@@ -298,11 +315,18 @@ class TerminalViewModel @Inject constructor(
     }
 
     fun resizeTerminal(columns: Int, rows: Int) {
+        // Always store the last known size for future connections
+        lastKnownColumns = columns
+        lastKnownRows = rows
+
         val session = currentSession ?: return
 
         viewModelScope.launch {
             session.emulator.resize(columns, rows)
             sshAdapter.resize(session.session.sessionId, TerminalSize(columns, rows))
+
+            // Update UI state with the new terminal state after resize
+            _uiState.update { it.copy(terminalState = session.emulator.state.value) }
         }
     }
 

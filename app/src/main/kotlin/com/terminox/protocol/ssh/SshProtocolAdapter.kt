@@ -112,10 +112,17 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
     /**
      * Authenticates with password and opens shell channel.
+     *
+     * @param sessionId The session to authenticate
+     * @param password The password for authentication
+     * @param columns Initial terminal width in columns (default 80)
+     * @param rows Initial terminal height in rows (default 24)
      */
     suspend fun authenticateWithPassword(
         sessionId: String,
-        password: String
+        password: String,
+        columns: Int = 80,
+        rows: Int = 24
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val holder = sessions[sessionId]
@@ -124,7 +131,7 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
             holder.clientSession.addPasswordIdentity(password)
             holder.clientSession.auth().verify(AUTH_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
-            openShellChannel(sessionId, holder)
+            openShellChannel(sessionId, holder, columns, rows)
         } catch (e: Exception) {
             Log.e(TAG, "Authentication failed", e)
             Result.failure(e)
@@ -133,11 +140,19 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
     /**
      * Authenticates with a private key and opens shell channel.
+     *
+     * @param sessionId The session to authenticate
+     * @param privateKey The SSH private key
+     * @param publicKey The SSH public key
+     * @param columns Initial terminal width in columns (default 80)
+     * @param rows Initial terminal height in rows (default 24)
      */
     suspend fun authenticateWithKey(
         sessionId: String,
         privateKey: PrivateKey,
-        publicKey: PublicKey
+        publicKey: PublicKey,
+        columns: Int = 80,
+        rows: Int = 24
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val holder = sessions[sessionId]
@@ -147,7 +162,7 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
             holder.clientSession.addPublicKeyIdentity(keyPair)
             holder.clientSession.auth().verify(AUTH_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
-            openShellChannel(sessionId, holder)
+            openShellChannel(sessionId, holder, columns, rows)
         } catch (e: Exception) {
             Log.e(TAG, "Key authentication failed", e)
             Result.failure(e)
@@ -156,15 +171,23 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
     /**
      * Opens a shell channel after successful authentication.
+     *
+     * @param sessionId The session ID
+     * @param holder The session holder
+     * @param columns Initial terminal width in columns
+     * @param rows Initial terminal height in rows
      */
     private fun openShellChannel(
         sessionId: String,
-        holder: SshSessionHolder
+        holder: SshSessionHolder,
+        columns: Int = 80,
+        rows: Int = 24
     ): Result<Unit> {
+        Log.d(TAG, "Opening shell channel with size: ${columns}x${rows}")
         val channel = holder.clientSession.createShellChannel()
         channel.setPtyType("xterm-256color")
-        channel.setPtyColumns(80)
-        channel.setPtyLines(24)
+        channel.setPtyColumns(columns)
+        channel.setPtyLines(rows)
         channel.open().verify(CHANNEL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
         val updatedHolder = holder.copy(
