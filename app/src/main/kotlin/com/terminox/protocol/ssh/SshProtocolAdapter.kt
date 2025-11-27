@@ -14,12 +14,20 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import android.util.Log
 import org.apache.sshd.client.SshClient
 import org.apache.sshd.client.channel.ChannelShell
 import org.apache.sshd.client.config.hosts.HostConfigEntryResolver
 import org.apache.sshd.client.keyverifier.AcceptAllServerKeyVerifier
 import org.apache.sshd.client.session.ClientSession
+import org.apache.sshd.common.cipher.BuiltinCiphers
+import org.apache.sshd.common.compression.BuiltinCompressions
+import org.apache.sshd.common.kex.BuiltinDHFactories
+import org.apache.sshd.common.kex.extension.DefaultClientKexExtensionHandler
 import org.apache.sshd.common.keyprovider.KeyIdentityProvider
+import org.apache.sshd.common.mac.BuiltinMacs
+import org.apache.sshd.common.signature.BuiltinSignatures
+import org.apache.sshd.common.util.security.SecurityUtils
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.KeyPair
@@ -57,8 +65,10 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
     /**
      * Creates an SSH client configured for Android (no filesystem access).
+     * Manually configures crypto algorithms since we can't use setUpDefaultClient().
      */
     private fun createAndroidSshClient(): SshClient {
+        Log.d(TAG, "Creating Android SSH client")
         return SshClient().apply {
             // Don't look for ~/.ssh/config
             hostConfigEntryResolver = HostConfigEntryResolver.EMPTY
@@ -69,18 +79,55 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
             // Don't look for ~/.ssh/id_* key files
             keyIdentityProvider = KeyIdentityProvider.EMPTY_KEYS_PROVIDER
+
+            // Configure cryptographic algorithms (normally done by setUpDefaultClient)
+            // Use SecurityUtils to get the properly configured factories
+            cipherFactories = BuiltinCiphers.VALUES.filter { it.isSupported }.toList()
+            macFactories = BuiltinMacs.VALUES.filter { it.isSupported }.toList()
+            signatureFactories = BuiltinSignatures.VALUES.filter { it.isSupported }.toList()
+            compressionFactories = listOf(
+                BuiltinCompressions.none,
+                BuiltinCompressions.zlib,
+                BuiltinCompressions.delayedZlib
+            ).filter { it.isSupported }.toList()
+
+            // Use ClientBuilder's default KEX factories
+            // The BuiltinDHFactories enum implements KeyExchangeFactory
+            @Suppress("UNCHECKED_CAST")
+            keyExchangeFactories = org.apache.sshd.client.ClientBuilder.DEFAULT_KEX_PREFERENCE
+                .filter { it.isSupported }
+                .toList() as List<org.apache.sshd.common.kex.KeyExchangeFactory>
+
+            // Enable KEX extension handling for modern SSH features
+            kexExtensionHandler = DefaultClientKexExtensionHandler.INSTANCE
+
+            Log.d(TAG, "SSH client configured with ${cipherFactories.size} ciphers, " +
+                    "${macFactories.size} MACs, ${signatureFactories.size} signatures, " +
+                    "${keyExchangeFactories.size} KEX algorithms")
         }
+    }
+
+    companion object {
+        private const val TAG = "SshProtocolAdapter"
+        private const val CONNECTION_TIMEOUT_SECONDS = 30L
+        private const val AUTH_TIMEOUT_SECONDS = 30L
+        private const val CHANNEL_TIMEOUT_SECONDS = 10L
+        private const val BUFFER_SIZE = 8192
     }
 
     private val sessions = ConcurrentHashMap<String, SshSessionHolder>()
 
     override suspend fun connect(connection: Connection): Result<TerminalSession> = withContext(Dispatchers.IO) {
         try {
-            val clientSession = sshClient.connect(
+            Log.d(TAG, "Connecting to ${connection.host}:${connection.port} as ${connection.username}")
+            val connectFuture = sshClient.connect(
                 connection.username,
                 connection.host,
                 connection.port
-            ).verify(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS).session
+            )
+            Log.d(TAG, "Connect future created, waiting for verification...")
+            val clientSession = connectFuture.verify(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS).session
+            Log.d(TAG, "Session established: ${clientSession.sessionId}")
 
             // Authenticate based on method
             when (val authMethod = connection.authMethod) {
@@ -281,13 +328,6 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
         }
         sessions.clear()
         sshClient.stop()
-    }
-
-    companion object {
-        private const val CONNECTION_TIMEOUT_SECONDS = 30L
-        private const val AUTH_TIMEOUT_SECONDS = 30L
-        private const val CHANNEL_TIMEOUT_SECONDS = 10L
-        private const val BUFFER_SIZE = 8192
     }
 }
 
