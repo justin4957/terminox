@@ -20,8 +20,10 @@ import org.apache.sshd.client.channel.ChannelShell
 import org.apache.sshd.client.config.hosts.HostConfigEntryResolver
 import org.apache.sshd.client.keyverifier.AcceptAllServerKeyVerifier
 import org.apache.sshd.client.session.ClientSession
+import org.apache.sshd.common.channel.ChannelFactory
 import org.apache.sshd.common.cipher.BuiltinCiphers
 import org.apache.sshd.common.compression.BuiltinCompressions
+import org.apache.sshd.common.forward.DefaultForwarderFactory
 import org.apache.sshd.common.kex.BuiltinDHFactories
 import org.apache.sshd.common.kex.extension.DefaultClientKexExtensionHandler
 import org.apache.sshd.common.keyprovider.KeyIdentityProvider
@@ -82,6 +84,9 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
             // Set up random number generator (required for crypto operations)
             randomFactory = JceRandomFactory.INSTANCE
+
+            // Set up port forwarding factory (required even if not using forwarding)
+            forwarderFactory = DefaultForwarderFactory.INSTANCE
 
             // Configure cryptographic algorithms (normally done by setUpDefaultClient)
             // Use SecurityUtils to get the properly configured factories
