@@ -1,0 +1,329 @@
+# Terminox Testing Guide
+
+This is a living document that describes all available testing procedures for the Terminox application. Update this document as new features and tests are added.
+
+## Table of Contents
+- [Automated Testing](#automated-testing)
+  - [Unit Tests](#unit-tests)
+  - [Instrumented Tests](#instrumented-tests)
+  - [CI Pipeline](#ci-pipeline)
+- [Manual Testing in Android Studio](#manual-testing-in-android-studio)
+  - [Running Tests](#running-tests)
+  - [Feature-Specific Testing](#feature-specific-testing)
+- [Test Coverage by Feature](#test-coverage-by-feature)
+
+---
+
+## Automated Testing
+
+### Unit Tests
+
+Unit tests are located in `app/src/test/kotlin/com/terminox/`.
+
+**Run from command line:**
+```bash
+./gradlew testDebugUnitTest
+```
+
+**Run from Android Studio:**
+1. Open the Project view
+2. Navigate to `app/src/test/kotlin/com/terminox/`
+3. Right-click on a test class or package
+4. Select "Run Tests"
+
+**Current Unit Test Coverage:**
+
+| Package | Test Class | Description |
+|---------|------------|-------------|
+| `data.repository` | `ConnectionRepositoryImplTest` | Tests for connection CRUD operations |
+
+### Instrumented Tests
+
+Instrumented tests run on a device/emulator and are located in `app/src/androidTest/kotlin/com/terminox/`.
+
+**Run from command line:**
+```bash
+./gradlew connectedDebugAndroidTest
+```
+
+**Run from Android Studio:**
+1. Connect a device or start an emulator (API 34+)
+2. Navigate to `app/src/androidTest/kotlin/com/terminox/`
+3. Right-click on a test class or package
+4. Select "Run Tests"
+
+**Current Instrumented Test Coverage:**
+
+| Package | Test Class | Description |
+|---------|------------|-------------|
+| - | - | No instrumented tests yet |
+
+### CI Pipeline
+
+GitHub Actions automatically runs on every pull request:
+
+| Job | Description | Artifacts |
+|-----|-------------|-----------|
+| `unit-tests` | Runs all unit tests | `unit-test-results` |
+| `lint` | Runs Android lint checks | `lint-results` |
+| `build` | Builds debug APK | `debug-apk` |
+| `instrumented-tests` | Runs tests on emulator | `instrumented-test-results` |
+
+---
+
+## Manual Testing in Android Studio
+
+### Running Tests
+
+#### All Unit Tests
+```
+Run > Run... > All Tests
+```
+Or use the Gradle panel: `app > Tasks > verification > test`
+
+#### Single Test Class
+1. Open the test file
+2. Click the green play button next to the class name
+3. Or right-click the class and select "Run"
+
+#### Single Test Method
+1. Open the test file
+2. Click the green play button next to the method name
+
+#### With Coverage
+1. Right-click on test class/package
+2. Select "Run with Coverage"
+3. View coverage report in the Coverage tool window
+
+### Feature-Specific Testing
+
+---
+
+## Test Coverage by Feature
+
+### Phase 1: Project Foundation
+**Status:** ✅ Complete
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| Connection Repository | ✅ `ConnectionRepositoryImplTest` | - | Create/edit/delete connections |
+| Navigation | - | - | Navigate between screens |
+| Theme | - | - | Verify dark theme applied |
+
+**Manual Test Checklist:**
+- [ ] App launches without crash
+- [ ] Home screen displays "No connections" when empty
+- [ ] FAB opens new connection form
+- [ ] Connection form validates required fields
+- [ ] Connection saves and appears in list
+- [ ] Connection can be edited
+- [ ] Connection can be deleted
+- [ ] Back navigation works correctly
+
+---
+
+### Phase 2: SSH Core
+**Status:** ✅ Complete
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| SSH Connection | - | - | Connect to SSH server |
+| Password Auth | - | - | Authenticate with password |
+| Terminal Emulator | - | - | Display terminal output |
+| Terminal Input | - | - | Send keyboard input |
+| ANSI Parsing | - | - | Display colors/formatting |
+| Terminal Resize | - | - | Resize on rotation |
+
+**Manual Test Checklist:**
+- [ ] Create connection with valid SSH server details
+- [ ] Tap connection to open terminal screen
+- [ ] Password dialog appears for password auth
+- [ ] Enter correct password - connection establishes
+- [ ] Enter wrong password - error displayed
+- [ ] Terminal output displays correctly
+- [ ] Type commands - input sent to server
+- [ ] Press Enter - command executes
+- [ ] ESC key sends escape
+- [ ] TAB key sends tab
+- [ ] Arrow keys navigate
+- [ ] CTRL+C sends interrupt
+- [ ] Colored output displays correctly
+- [ ] Bold/italic text displays correctly
+- [ ] Rotate device - terminal resizes
+- [ ] Back button disconnects cleanly
+- [ ] Reconnect after disconnect works
+
+**Android Studio Testing:**
+```bash
+# Run SSH-related unit tests (when added)
+./gradlew testDebugUnitTest --tests "com.terminox.protocol.*"
+
+# Run terminal emulator tests (when added)
+./gradlew testDebugUnitTest --tests "com.terminox.protocol.terminal.*"
+```
+
+---
+
+### Phase 3: Security & Key Management
+**Status:** 🔲 Pending
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| Key Generation | - | - | Generate SSH key pair |
+| Key Storage | - | - | Store in Android Keystore |
+| Biometric Auth | - | - | Unlock with fingerprint |
+| Key-based SSH | - | - | Authenticate with key |
+
+**Manual Test Checklist:**
+- [ ] Generate new SSH key pair
+- [ ] View public key
+- [ ] Copy public key to clipboard
+- [ ] Key stored securely (verify in Keystore)
+- [ ] Biometric prompt appears when accessing key
+- [ ] Biometric auth succeeds - key accessible
+- [ ] Biometric auth fails - key inaccessible
+- [ ] Connect to server using key auth
+
+---
+
+### Phase 4: Mobile UX Polish
+**Status:** 🔲 Pending
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| Session Drawer | - | - | Multiple sessions |
+| Gestures | - | - | Swipe gestures |
+| Quick Connect | - | - | Connect from history |
+
+---
+
+### Phase 5: Mosh Protocol
+**Status:** 🔲 Pending
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| Mosh Connection | - | - | Connect via Mosh |
+| Roaming | - | - | Survive network change |
+
+---
+
+### Phase 6: Configuration Sync
+**Status:** 🔲 Pending
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| Google Drive Sync | - | - | Sync to Drive |
+| WebDAV Sync | - | - | Sync to WebDAV |
+| Dotfiles Import | - | - | Import from repo |
+
+---
+
+### Phase 7: Final Polish
+**Status:** 🔲 Pending
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| Performance | - | - | Profile and optimize |
+| Accessibility | - | - | Screen reader support |
+
+---
+
+## Adding New Tests
+
+### Unit Test Template
+```kotlin
+package com.terminox.feature
+
+import org.junit.Before
+import org.junit.Test
+import kotlin.test.assertEquals
+
+class FeatureTest {
+
+    private lateinit var sut: Feature
+
+    @Before
+    fun setup() {
+        sut = Feature()
+    }
+
+    @Test
+    fun `given condition when action then result`() {
+        // Arrange
+        val input = "test"
+
+        // Act
+        val result = sut.doSomething(input)
+
+        // Assert
+        assertEquals(expected, result)
+    }
+}
+```
+
+### Instrumented Test Template
+```kotlin
+package com.terminox.feature
+
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Test
+import org.junit.runner.RunWith
+import kotlin.test.assertEquals
+
+@RunWith(AndroidJUnit4::class)
+class FeatureInstrumentedTest {
+
+    @Test
+    fun useAppContext() {
+        val appContext = InstrumentationRegistry.getInstrumentation().targetContext
+        assertEquals("com.terminox", appContext.packageName)
+    }
+}
+```
+
+### Compose UI Test Template
+```kotlin
+package com.terminox.presentation.feature
+
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import org.junit.Rule
+import org.junit.Test
+
+class FeatureScreenTest {
+
+    @get:Rule
+    val composeTestRule = createComposeRule()
+
+    @Test
+    fun buttonClick_showsDialog() {
+        composeTestRule.setContent {
+            FeatureScreen()
+        }
+
+        composeTestRule.onNodeWithText("Click Me").performClick()
+        composeTestRule.onNodeWithText("Dialog Title").assertExists()
+    }
+}
+```
+
+---
+
+## Test Commands Reference
+
+| Command | Description |
+|---------|-------------|
+| `./gradlew test` | Run all unit tests |
+| `./gradlew testDebugUnitTest` | Run debug unit tests |
+| `./gradlew testReleaseUnitTest` | Run release unit tests |
+| `./gradlew connectedAndroidTest` | Run instrumented tests |
+| `./gradlew connectedDebugAndroidTest` | Run debug instrumented tests |
+| `./gradlew lintDebug` | Run lint checks |
+| `./gradlew check` | Run all checks (tests + lint) |
+| `./gradlew jacocoTestReport` | Generate coverage report (if configured) |
+
+---
+
+*Last updated: Phase 2 - SSH Core*
