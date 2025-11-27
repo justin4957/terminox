@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.terminox.R
 import com.terminox.domain.model.SessionState
@@ -89,7 +90,7 @@ fun TerminalScreen(
                             text = uiState.error ?: "Unknown error",
                             color = MaterialTheme.colorScheme.error
                         )
-                        Spacer(modifier = Modifier.height(androidx.compose.ui.unit.dp(16)))
+                        Spacer(modifier = Modifier.height(16.dp))
                         Button(onClick = { viewModel.connect(connectionId) }) {
                             Text("Retry")
                         }
