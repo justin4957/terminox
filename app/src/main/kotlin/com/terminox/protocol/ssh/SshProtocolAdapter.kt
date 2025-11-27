@@ -1,6 +1,5 @@
 package com.terminox.protocol.ssh
 
-import android.content.Context
 import android.util.Log
 import com.terminox.domain.model.AuthMethod
 import com.terminox.domain.model.Connection
@@ -10,7 +9,6 @@ import com.terminox.domain.model.TerminalSession
 import com.terminox.domain.model.TerminalSize
 import com.terminox.protocol.TerminalOutput
 import com.terminox.protocol.TerminalProtocol
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -37,19 +35,17 @@ import javax.inject.Singleton
 /**
  * SSH protocol adapter using Apache MINA SSHD.
  * Handles SSH connections, authentication, and terminal I/O.
+ *
+ * NOTE: user.home must be set before this class is loaded.
+ * This is done in TerminoxApp.onCreate() to ensure it happens
+ * before any MINA SSHD static initializers run.
  */
 @Singleton
-class SshProtocolAdapter @Inject constructor(
-    @ApplicationContext private val context: Context
-) : TerminalProtocol {
+class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
     override val protocolType = ProtocolType.SSH
 
     private val sshClient: SshClient by lazy {
-        // Set user.home to app's files directory before MINA SSHD initializes
-        // This prevents "No user home" errors from PathUtils
-        ensureUserHomeSet()
-
         Log.d(TAG, "Creating SSH client using setUpDefaultClient()")
         SshClient.setUpDefaultClient().apply {
             // Override settings that would try to access the filesystem
@@ -59,18 +55,6 @@ class SshProtocolAdapter @Inject constructor(
 
             Log.d(TAG, "SSH client configured")
             start()
-        }
-    }
-
-    /**
-     * Ensures the user.home system property is set before MINA SSHD initialization.
-     * Android doesn't have a user home directory by default, which causes MINA SSHD to crash.
-     */
-    private fun ensureUserHomeSet() {
-        if (System.getProperty("user.home") == null) {
-            val homeDir = context.filesDir.absolutePath
-            System.setProperty("user.home", homeDir)
-            Log.d(TAG, "Set user.home to: $homeDir")
         }
     }
 
