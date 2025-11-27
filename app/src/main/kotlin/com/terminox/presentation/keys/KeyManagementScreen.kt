@@ -331,13 +331,20 @@ private fun GenerateKeyDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Require Biometric", style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            text = if (biometricAvailable) "Protect with fingerprint" else "Biometric not available",
+                            text = when {
+                                !biometricAvailable -> "Not available on this device"
+                                requireBiometric -> "Key will be protected with fingerprint"
+                                else -> "Key will not require biometric"
+                            },
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (!biometricAvailable)
+                                MaterialTheme.colorScheme.error
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(
-                        checked = requireBiometric,
+                        checked = requireBiometric && biometricAvailable,
                         onCheckedChange = { requireBiometric = it },
                         enabled = biometricAvailable && !isGenerating
                     )
@@ -346,7 +353,7 @@ private fun GenerateKeyDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onGenerate(name, selectedType, requireBiometric) },
+                onClick = { onGenerate(name, selectedType, requireBiometric && biometricAvailable) },
                 enabled = name.isNotBlank() && !isGenerating
             ) {
                 if (isGenerating) {
@@ -413,13 +420,20 @@ private fun ImportKeyDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Require Biometric", style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            text = if (biometricAvailable) "Protect with fingerprint" else "Biometric not available",
+                            text = when {
+                                !biometricAvailable -> "Not available on this device"
+                                requireBiometric -> "Key will be protected with fingerprint"
+                                else -> "Key will not require biometric"
+                            },
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (!biometricAvailable)
+                                MaterialTheme.colorScheme.error
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(
-                        checked = requireBiometric,
+                        checked = requireBiometric && biometricAvailable,
                         onCheckedChange = { requireBiometric = it },
                         enabled = biometricAvailable && !isImporting
                     )
@@ -428,7 +442,7 @@ private fun ImportKeyDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onImport(name, privateKey, requireBiometric) },
+                onClick = { onImport(name, privateKey, requireBiometric && biometricAvailable) },
                 enabled = name.isNotBlank() && privateKey.isNotBlank() && !isImporting
             ) {
                 if (isImporting) {

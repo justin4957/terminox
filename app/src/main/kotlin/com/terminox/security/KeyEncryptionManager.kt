@@ -86,9 +86,13 @@ class KeyEncryptionManager @Inject constructor(
     /**
      * Encrypts data using the specified key alias.
      * Returns encrypted data with IV prepended.
+     *
+     * @param keyAlias The alias for the encryption key
+     * @param data The data to encrypt
+     * @param requireBiometric Whether the key should require biometric authentication
      */
-    fun encrypt(keyAlias: String, data: ByteArray): EncryptedData {
-        val key = getOrCreateEncryptionKey(keyAlias)
+    fun encrypt(keyAlias: String, data: ByteArray, requireBiometric: Boolean = true): EncryptedData {
+        val key = getOrCreateEncryptionKey(keyAlias, requireBiometric)
         val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key)
 

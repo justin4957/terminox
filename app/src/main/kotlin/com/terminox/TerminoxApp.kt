@@ -27,11 +27,12 @@ class TerminoxApp : Application() {
      * before any MINA SSHD classes can be loaded.
      */
     private fun ensureUserHomeSet() {
-        if (System.getProperty("user.home") == null) {
-            val homeDir = filesDir.absolutePath
-            System.setProperty("user.home", homeDir)
-            Log.d(TAG, "Set user.home to: $homeDir")
-        }
+        val currentHome = System.getProperty("user.home")
+        Log.d(TAG, "Current user.home: $currentHome")
+
+        val homeDir = filesDir.absolutePath
+        System.setProperty("user.home", homeDir)
+        Log.d(TAG, "Set user.home to: $homeDir")
     }
 
     companion object {
