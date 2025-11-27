@@ -1,5 +1,6 @@
 package com.terminox.protocol.ssh
 
+import android.util.Log
 import com.terminox.domain.model.AuthMethod
 import com.terminox.domain.model.Connection
 import com.terminox.domain.model.ProtocolType
@@ -16,7 +17,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.apache.sshd.client.SshClient
 import org.apache.sshd.client.channel.ChannelShell
+import org.apache.sshd.client.config.hosts.HostConfigEntryResolver
+import org.apache.sshd.client.keyverifier.AcceptAllServerKeyVerifier
 import org.apache.sshd.client.session.ClientSession
+import org.apache.sshd.common.keyprovider.KeyIdentityProvider
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.KeyPair
@@ -31,6 +35,10 @@ import javax.inject.Singleton
 /**
  * SSH protocol adapter using Apache MINA SSHD.
  * Handles SSH connections, authentication, and terminal I/O.
+ *
+ * NOTE: user.home must be set before this class is loaded.
+ * This is done in TerminoxApp.onCreate() to ensure it happens
+ * before any MINA SSHD static initializers run.
  */
 @Singleton
 class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
@@ -38,7 +46,14 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
     override val protocolType = ProtocolType.SSH
 
     private val sshClient: SshClient by lazy {
+        Log.d(TAG, "Creating SSH client using setUpDefaultClient()")
         SshClient.setUpDefaultClient().apply {
+            // Override settings that would try to access the filesystem
+            hostConfigEntryResolver = HostConfigEntryResolver.EMPTY
+            serverKeyVerifier = AcceptAllServerKeyVerifier.INSTANCE
+            keyIdentityProvider = KeyIdentityProvider.EMPTY_KEYS_PROVIDER
+
+            Log.d(TAG, "SSH client configured")
             start()
         }
     }
@@ -47,11 +62,15 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
     override suspend fun connect(connection: Connection): Result<TerminalSession> = withContext(Dispatchers.IO) {
         try {
-            val clientSession = sshClient.connect(
+            Log.d(TAG, "Connecting to ${connection.host}:${connection.port} as ${connection.username}")
+            val connectFuture = sshClient.connect(
                 connection.username,
                 connection.host,
                 connection.port
-            ).verify(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS).session
+            )
+            Log.d(TAG, "Connect future created, waiting for verification...")
+            val clientSession = connectFuture.verify(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS).session
+            Log.d(TAG, "Session established: ${clientSession.sessionId}")
 
             // Authenticate based on method
             when (val authMethod = connection.authMethod) {
@@ -86,6 +105,7 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
             Result.success(terminalSession)
         } catch (e: Exception) {
+            Log.e(TAG, "Connection failed", e)
             Result.failure(e)
         }
     }
@@ -106,6 +126,7 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
             openShellChannel(sessionId, holder)
         } catch (e: Exception) {
+            Log.e(TAG, "Authentication failed", e)
             Result.failure(e)
         }
     }
@@ -128,6 +149,7 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
             openShellChannel(sessionId, holder)
         } catch (e: Exception) {
+            Log.e(TAG, "Key authentication failed", e)
             Result.failure(e)
         }
     }
@@ -255,6 +277,7 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
     }
 
     companion object {
+        private const val TAG = "SshProtocolAdapter"
         private const val CONNECTION_TIMEOUT_SECONDS = 30L
         private const val AUTH_TIMEOUT_SECONDS = 30L
         private const val CHANNEL_TIMEOUT_SECONDS = 10L

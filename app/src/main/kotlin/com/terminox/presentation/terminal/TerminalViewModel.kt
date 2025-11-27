@@ -22,6 +22,18 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Represents a managed session in the UI state.
+ */
+data class SessionUiInfo(
+    val sessionId: String,
+    val connectionId: String,
+    val connectionName: String,
+    val host: String,
+    val username: String,
+    val state: SessionState
+)
+
 data class TerminalUiState(
     val connectionName: String = "",
     val connectionHost: String = "",
@@ -29,7 +41,10 @@ data class TerminalUiState(
     val sessionState: SessionState = SessionState.DISCONNECTED,
     val terminalState: TerminalState = TerminalState(),
     val showPasswordDialog: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    // Multi-session support
+    val sessions: List<SessionUiInfo> = emptyList(),
+    val activeSessionId: String? = null
 )
 
 @HiltViewModel
@@ -41,10 +56,16 @@ class TerminalViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(TerminalUiState())
     val uiState: StateFlow<TerminalUiState> = _uiState.asStateFlow()
 
-    private var currentSession: TerminalSession? = null
-    private var currentConnection: Connection? = null
-    private var outputJob: Job? = null
-    private var terminalEmulator: TerminalEmulator? = null
+    // Session management
+    private data class ManagedSession(
+        val session: TerminalSession,
+        val connection: Connection,
+        val emulator: TerminalEmulator,
+        val outputJob: Job?
+    )
+
+    private val managedSessions = mutableMapOf<String, ManagedSession>()
+    private var currentSession: ManagedSession? = null
 
     private val sshAdapter: SshProtocolAdapter by lazy {
         protocolFactory.getSshAdapter()
@@ -65,7 +86,6 @@ class TerminalViewModel @Inject constructor(
                 return@launch
             }
 
-            currentConnection = connection
             _uiState.update {
                 it.copy(
                     connectionName = connection.name,
@@ -79,14 +99,26 @@ class TerminalViewModel @Inject constructor(
 
             result.fold(
                 onSuccess = { session ->
-                    currentSession = session
+                    val emulator = TerminalEmulator()
+                    val managed = ManagedSession(
+                        session = session,
+                        connection = connection,
+                        emulator = emulator,
+                        outputJob = null
+                    )
+
+                    managedSessions[session.sessionId] = managed
+                    currentSession = managed
+
+                    updateSessionList()
 
                     // Check if we need password authentication
                     if (connection.authMethod is AuthMethod.Password) {
                         _uiState.update {
                             it.copy(
                                 sessionState = SessionState.AUTHENTICATING,
-                                showPasswordDialog = true
+                                showPasswordDialog = true,
+                                activeSessionId = session.sessionId
                             )
                         }
                     } else {
@@ -117,27 +149,26 @@ class TerminalViewModel @Inject constructor(
 
             val session = currentSession ?: return@launch
 
-            val result = sshAdapter.authenticateWithPassword(session.sessionId, password)
+            val result = sshAdapter.authenticateWithPassword(session.session.sessionId, password)
 
             result.fold(
                 onSuccess = {
-                    // Initialize terminal emulator
-                    terminalEmulator = TerminalEmulator()
-
                     _uiState.update {
                         it.copy(
                             sessionState = SessionState.CONNECTED,
-                            terminalState = terminalEmulator!!.state.value
+                            terminalState = session.emulator.state.value
                         )
                     }
 
                     // Update last connected timestamp
-                    currentConnection?.let { conn ->
-                        connectionRepository.updateLastConnected(conn.id, System.currentTimeMillis())
-                    }
+                    connectionRepository.updateLastConnected(
+                        session.connection.id,
+                        System.currentTimeMillis()
+                    )
 
                     // Start collecting output
-                    startOutputCollection(session.sessionId)
+                    startOutputCollection(session.session.sessionId)
+                    updateSessionList()
                 },
                 onFailure = { error ->
                     _uiState.update {
@@ -162,13 +193,15 @@ class TerminalViewModel @Inject constructor(
     }
 
     private fun startOutputCollection(sessionId: String) {
-        outputJob?.cancel()
+        val managed = managedSessions[sessionId] ?: return
 
-        outputJob = viewModelScope.launch {
+        val job = viewModelScope.launch {
             // Collect terminal emulator state updates
             launch {
-                terminalEmulator?.state?.collect { terminalState ->
-                    _uiState.update { it.copy(terminalState = terminalState) }
+                managed.emulator.state.collect { terminalState ->
+                    if (currentSession?.session?.sessionId == sessionId) {
+                        _uiState.update { it.copy(terminalState = terminalState) }
+                    }
                 }
             }
 
@@ -176,24 +209,32 @@ class TerminalViewModel @Inject constructor(
             sshAdapter.outputFlow(sessionId).collect { output ->
                 when (output) {
                     is TerminalOutput.Data -> {
-                        terminalEmulator?.processInput(output.bytes)
+                        managed.emulator.processInput(output.bytes)
                     }
                     is TerminalOutput.Error -> {
-                        _uiState.update { it.copy(error = output.message) }
+                        if (currentSession?.session?.sessionId == sessionId) {
+                            _uiState.update { it.copy(error = output.message) }
+                        }
                     }
                     is TerminalOutput.Disconnected -> {
-                        _uiState.update { it.copy(sessionState = SessionState.DISCONNECTED) }
+                        if (currentSession?.session?.sessionId == sessionId) {
+                            _uiState.update { it.copy(sessionState = SessionState.DISCONNECTED) }
+                        }
+                        updateSessionList()
                     }
                 }
             }
         }
+
+        // Update the managed session with the job
+        managedSessions[sessionId] = managed.copy(outputJob = job)
     }
 
     fun sendInput(text: String) {
         val session = currentSession ?: return
 
         viewModelScope.launch {
-            sshAdapter.sendInput(session.sessionId, text.toByteArray())
+            sshAdapter.sendInput(session.session.sessionId, text.toByteArray())
         }
     }
 
@@ -220,12 +261,105 @@ class TerminalViewModel @Inject constructor(
         sendInput(sequence)
     }
 
+    /**
+     * Sends a Ctrl+character combination.
+     */
+    fun sendCtrlKey(char: Char) {
+        val ctrlChar = when (char.lowercaseChar()) {
+            'a' -> "\u0001"
+            'b' -> "\u0002"
+            'c' -> "\u0003"
+            'd' -> "\u0004"
+            'e' -> "\u0005"
+            'f' -> "\u0006"
+            'g' -> "\u0007"
+            'h' -> "\u0008"
+            'i' -> "\u0009"
+            'j' -> "\u000a"
+            'k' -> "\u000b"
+            'l' -> "\u000c"
+            'm' -> "\u000d"
+            'n' -> "\u000e"
+            'o' -> "\u000f"
+            'p' -> "\u0010"
+            'q' -> "\u0011"
+            'r' -> "\u0012"
+            's' -> "\u0013"
+            't' -> "\u0014"
+            'u' -> "\u0015"
+            'v' -> "\u0016"
+            'w' -> "\u0017"
+            'x' -> "\u0018"
+            'y' -> "\u0019"
+            'z' -> "\u001a"
+            else -> return
+        }
+        sendInput(ctrlChar)
+    }
+
     fun resizeTerminal(columns: Int, rows: Int) {
         val session = currentSession ?: return
 
         viewModelScope.launch {
-            terminalEmulator?.resize(columns, rows)
-            sshAdapter.resize(session.sessionId, TerminalSize(columns, rows))
+            session.emulator.resize(columns, rows)
+            sshAdapter.resize(session.session.sessionId, TerminalSize(columns, rows))
+        }
+    }
+
+    /**
+     * Switches to a different session.
+     */
+    fun switchSession(sessionId: String) {
+        val managed = managedSessions[sessionId] ?: return
+
+        currentSession = managed
+        _uiState.update {
+            it.copy(
+                connectionName = managed.connection.name,
+                connectionHost = managed.connection.host,
+                connectionUsername = managed.connection.username,
+                terminalState = managed.emulator.state.value,
+                activeSessionId = sessionId
+            )
+        }
+        updateSessionList()
+    }
+
+    /**
+     * Closes a specific session.
+     */
+    fun closeSession(sessionId: String) {
+        val managed = managedSessions[sessionId] ?: return
+
+        viewModelScope.launch {
+            managed.outputJob?.cancel()
+            sshAdapter.disconnect(sessionId)
+            managedSessions.remove(sessionId)
+
+            // If we closed the current session, switch to another
+            if (currentSession?.session?.sessionId == sessionId) {
+                currentSession = managedSessions.values.firstOrNull()
+                currentSession?.let { newCurrent ->
+                    _uiState.update {
+                        it.copy(
+                            connectionName = newCurrent.connection.name,
+                            connectionHost = newCurrent.connection.host,
+                            connectionUsername = newCurrent.connection.username,
+                            terminalState = newCurrent.emulator.state.value,
+                            activeSessionId = newCurrent.session.sessionId,
+                            sessionState = SessionState.CONNECTED
+                        )
+                    }
+                } ?: run {
+                    _uiState.update {
+                        it.copy(
+                            sessionState = SessionState.DISCONNECTED,
+                            activeSessionId = null
+                        )
+                    }
+                }
+            }
+            updateSessionList()
         }
     }
 
@@ -233,10 +367,37 @@ class TerminalViewModel @Inject constructor(
         val session = currentSession ?: return
 
         viewModelScope.launch {
-            outputJob?.cancel()
-            sshAdapter.disconnect(session.sessionId)
+            session.outputJob?.cancel()
+            sshAdapter.disconnect(session.session.sessionId)
+            managedSessions.remove(session.session.sessionId)
             currentSession = null
             _uiState.update { it.copy(sessionState = SessionState.DISCONNECTED) }
+            updateSessionList()
+        }
+    }
+
+    /**
+     * Updates the session list in UI state.
+     */
+    private fun updateSessionList() {
+        val sessions = managedSessions.map { (id, managed) ->
+            SessionUiInfo(
+                sessionId = id,
+                connectionId = managed.connection.id,
+                connectionName = managed.connection.name,
+                host = managed.connection.host,
+                username = managed.connection.username,
+                state = if (id == currentSession?.session?.sessionId)
+                    _uiState.value.sessionState
+                else
+                    SessionState.CONNECTED
+            )
+        }
+        _uiState.update {
+            it.copy(
+                sessions = sessions,
+                activeSessionId = currentSession?.session?.sessionId
+            )
         }
     }
 
@@ -246,7 +407,14 @@ class TerminalViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        disconnect()
+        // Close all sessions
+        managedSessions.forEach { (sessionId, managed) ->
+            managed.outputJob?.cancel()
+            viewModelScope.launch {
+                sshAdapter.disconnect(sessionId)
+            }
+        }
+        managedSessions.clear()
     }
 }
 
