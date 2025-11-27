@@ -19,6 +19,9 @@ import org.apache.sshd.client.channel.ChannelShell
 import org.apache.sshd.client.session.ClientSession
 import java.io.InputStream
 import java.io.OutputStream
+import java.security.KeyPair
+import java.security.PrivateKey
+import java.security.PublicKey
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -101,24 +104,55 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
             holder.clientSession.addPasswordIdentity(password)
             holder.clientSession.auth().verify(AUTH_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
-            // Open shell channel
-            val channel = holder.clientSession.createShellChannel()
-            channel.setPtyType("xterm-256color")
-            channel.setPtyColumns(80)
-            channel.setPtyLines(24)
-            channel.open().verify(CHANNEL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-
-            val updatedHolder = holder.copy(
-                channel = channel,
-                inputStream = channel.invertedOut,
-                outputStream = channel.invertedIn
-            )
-            sessions[sessionId] = updatedHolder
-
-            Result.success(Unit)
+            openShellChannel(sessionId, holder)
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    /**
+     * Authenticates with a private key and opens shell channel.
+     */
+    suspend fun authenticateWithKey(
+        sessionId: String,
+        privateKey: PrivateKey,
+        publicKey: PublicKey
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val holder = sessions[sessionId]
+                ?: return@withContext Result.failure(IllegalStateException("Session not found"))
+
+            val keyPair = KeyPair(publicKey, privateKey)
+            holder.clientSession.addPublicKeyIdentity(keyPair)
+            holder.clientSession.auth().verify(AUTH_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+
+            openShellChannel(sessionId, holder)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Opens a shell channel after successful authentication.
+     */
+    private fun openShellChannel(
+        sessionId: String,
+        holder: SshSessionHolder
+    ): Result<Unit> {
+        val channel = holder.clientSession.createShellChannel()
+        channel.setPtyType("xterm-256color")
+        channel.setPtyColumns(80)
+        channel.setPtyLines(24)
+        channel.open().verify(CHANNEL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+
+        val updatedHolder = holder.copy(
+            channel = channel,
+            inputStream = channel.invertedOut,
+            outputStream = channel.invertedIn
+        )
+        sessions[sessionId] = updatedHolder
+
+        return Result.success(Unit)
     }
 
     override suspend fun disconnect(sessionId: String): Result<Unit> = withContext(Dispatchers.IO) {

@@ -102,6 +102,9 @@ dependencies {
     implementation(libs.mina.sshd.core)
     implementation(libs.mina.sshd.sftp)
 
+    // Crypto - Ed25519
+    implementation(libs.eddsa)
+
     // Network
     implementation(libs.okhttp)
 
