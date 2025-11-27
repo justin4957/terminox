@@ -1,5 +1,7 @@
 package com.terminox.protocol.ssh
 
+import android.content.Context
+import android.util.Log
 import com.terminox.domain.model.AuthMethod
 import com.terminox.domain.model.Connection
 import com.terminox.domain.model.ProtocolType
@@ -8,28 +10,19 @@ import com.terminox.domain.model.TerminalSession
 import com.terminox.domain.model.TerminalSize
 import com.terminox.protocol.TerminalOutput
 import com.terminox.protocol.TerminalProtocol
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
-import android.util.Log
 import org.apache.sshd.client.SshClient
 import org.apache.sshd.client.channel.ChannelShell
 import org.apache.sshd.client.config.hosts.HostConfigEntryResolver
 import org.apache.sshd.client.keyverifier.AcceptAllServerKeyVerifier
 import org.apache.sshd.client.session.ClientSession
-import org.apache.sshd.common.channel.ChannelFactory
-import org.apache.sshd.common.cipher.BuiltinCiphers
-import org.apache.sshd.common.compression.BuiltinCompressions
-import org.apache.sshd.common.forward.DefaultForwarderFactory
-import org.apache.sshd.common.kex.BuiltinDHFactories
-import org.apache.sshd.common.kex.extension.DefaultClientKexExtensionHandler
 import org.apache.sshd.common.keyprovider.KeyIdentityProvider
-import org.apache.sshd.common.mac.BuiltinMacs
-import org.apache.sshd.common.random.JceRandomFactory
-import org.apache.sshd.common.signature.BuiltinSignatures
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.KeyPair
@@ -46,81 +39,39 @@ import javax.inject.Singleton
  * Handles SSH connections, authentication, and terminal I/O.
  */
 @Singleton
-class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
+class SshProtocolAdapter @Inject constructor(
+    @ApplicationContext private val context: Context
+) : TerminalProtocol {
 
     override val protocolType = ProtocolType.SSH
 
     private val sshClient: SshClient by lazy {
-        // Create SSH client without default file-based configurations
-        // Android doesn't have a user home directory, so we must avoid
-        // any code paths that try to access ~/.ssh or similar
-        //
-        // We CANNOT use SshClient.setUpDefaultClient() because it statically
-        // initializes DefaultConfigFileHostEntryResolver which tries to access
-        // user.home system property that doesn't exist on Android.
-        //
-        // Instead, we create a minimal client and configure it manually.
-        createAndroidSshClient().also { client ->
-            client.start()
+        // Set user.home to app's files directory before MINA SSHD initializes
+        // This prevents "No user home" errors from PathUtils
+        ensureUserHomeSet()
+
+        Log.d(TAG, "Creating SSH client using setUpDefaultClient()")
+        SshClient.setUpDefaultClient().apply {
+            // Override settings that would try to access the filesystem
+            hostConfigEntryResolver = HostConfigEntryResolver.EMPTY
+            serverKeyVerifier = AcceptAllServerKeyVerifier.INSTANCE
+            keyIdentityProvider = KeyIdentityProvider.EMPTY_KEYS_PROVIDER
+
+            Log.d(TAG, "SSH client configured")
+            start()
         }
     }
 
     /**
-     * Creates an SSH client configured for Android (no filesystem access).
-     * Manually configures crypto algorithms since we can't use setUpDefaultClient().
+     * Ensures the user.home system property is set before MINA SSHD initialization.
+     * Android doesn't have a user home directory by default, which causes MINA SSHD to crash.
      */
-    private fun createAndroidSshClient(): SshClient {
-        Log.d(TAG, "Creating Android SSH client")
-        return SshClient().apply {
-            // Don't look for ~/.ssh/config
-            hostConfigEntryResolver = HostConfigEntryResolver.EMPTY
-
-            // Accept all server keys for now
-            // TODO: Implement proper host key verification with user prompts
-            serverKeyVerifier = AcceptAllServerKeyVerifier.INSTANCE
-
-            // Don't look for ~/.ssh/id_* key files
-            keyIdentityProvider = KeyIdentityProvider.EMPTY_KEYS_PROVIDER
-
-            // Set up random number generator (required for crypto operations)
-            randomFactory = JceRandomFactory.INSTANCE
-
-            // Set up port forwarding factory (required even if not using forwarding)
-            forwarderFactory = DefaultForwarderFactory.INSTANCE
-
-            // Configure cryptographic algorithms (normally done by setUpDefaultClient)
-            // Use SecurityUtils to get the properly configured factories
-            cipherFactories = BuiltinCiphers.VALUES.filter { it.isSupported }.toList()
-            macFactories = BuiltinMacs.VALUES.filter { it.isSupported }.toList()
-            signatureFactories = BuiltinSignatures.VALUES.filter { it.isSupported }.toList()
-            compressionFactories = listOf(
-                BuiltinCompressions.none,
-                BuiltinCompressions.zlib,
-                BuiltinCompressions.delayedZlib
-            ).filter { it.isSupported }.toList()
-
-            // Use ClientBuilder's default KEX factories
-            // The BuiltinDHFactories enum implements KeyExchangeFactory
-            @Suppress("UNCHECKED_CAST")
-            keyExchangeFactories = org.apache.sshd.client.ClientBuilder.DEFAULT_KEX_PREFERENCE
-                .filter { it.isSupported }
-                .toList() as List<org.apache.sshd.common.kex.KeyExchangeFactory>
-
-            // Enable KEX extension handling for modern SSH features
-            kexExtensionHandler = DefaultClientKexExtensionHandler.INSTANCE
-
-            Log.d(TAG, "SSH client configured with ${cipherFactories.size} ciphers, " +
-                    "${macFactories.size} MACs, ${signatureFactories.size} signatures, " +
-                    "${keyExchangeFactories.size} KEX algorithms")
+    private fun ensureUserHomeSet() {
+        if (System.getProperty("user.home") == null) {
+            val homeDir = context.filesDir.absolutePath
+            System.setProperty("user.home", homeDir)
+            Log.d(TAG, "Set user.home to: $homeDir")
         }
-    }
-
-    companion object {
-        private const val TAG = "SshProtocolAdapter"
-        private const val CONNECTION_TIMEOUT_SECONDS = 30L
-        private const val AUTH_TIMEOUT_SECONDS = 30L
-        private const val CHANNEL_TIMEOUT_SECONDS = 10L
-        private const val BUFFER_SIZE = 8192
     }
 
     private val sessions = ConcurrentHashMap<String, SshSessionHolder>()
@@ -170,6 +121,7 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
             Result.success(terminalSession)
         } catch (e: Exception) {
+            Log.e(TAG, "Connection failed", e)
             Result.failure(e)
         }
     }
@@ -190,6 +142,7 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
             openShellChannel(sessionId, holder)
         } catch (e: Exception) {
+            Log.e(TAG, "Authentication failed", e)
             Result.failure(e)
         }
     }
@@ -212,6 +165,7 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
             openShellChannel(sessionId, holder)
         } catch (e: Exception) {
+            Log.e(TAG, "Key authentication failed", e)
             Result.failure(e)
         }
     }
@@ -336,6 +290,14 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
         }
         sessions.clear()
         sshClient.stop()
+    }
+
+    companion object {
+        private const val TAG = "SshProtocolAdapter"
+        private const val CONNECTION_TIMEOUT_SECONDS = 30L
+        private const val AUTH_TIMEOUT_SECONDS = 30L
+        private const val CHANNEL_TIMEOUT_SECONDS = 10L
+        private const val BUFFER_SIZE = 8192
     }
 }
 
