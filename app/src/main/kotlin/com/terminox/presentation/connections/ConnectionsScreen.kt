@@ -1,0 +1,130 @@
+package com.terminox.presentation.connections
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.terminox.R
+import com.terminox.domain.model.Connection
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ConnectionsScreen(
+    onConnectionClick: (String) -> Unit,
+    onNavigateToKeys: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    viewModel: ConnectionsViewModel = hiltViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.connections_title)) },
+                actions = {
+                    IconButton(onClick = onNavigateToKeys) {
+                        Icon(Icons.Default.Key, contentDescription = stringResource(R.string.nav_keys))
+                    }
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.nav_settings))
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showAddDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.connections_add))
+            }
+        }
+    ) { paddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
+            when {
+                uiState.isLoading -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+                uiState.connections.isEmpty() -> {
+                    Text(
+                        text = stringResource(R.string.connections_empty),
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+                else -> {
+                    LazyColumn(
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(uiState.connections, key = { it.id }) { connection ->
+                            ConnectionCard(
+                                connection = connection,
+                                onClick = { onConnectionClick(connection.id) },
+                                onDelete = { viewModel.deleteConnection(connection.id) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAddDialog) {
+        AddConnectionDialog(
+            onDismiss = { showAddDialog = false },
+            onSave = { connection ->
+                viewModel.saveConnection(connection)
+                showAddDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+fun ConnectionCard(
+    connection: Connection,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Text(
+                text = connection.name,
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "${connection.username}@${connection.host}:${connection.port}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = connection.protocol.name,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}

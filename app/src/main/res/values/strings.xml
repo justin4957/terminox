@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Terminox</string>
+
+    <!-- Navigation -->
+    <string name="nav_connections">Connections</string>
+    <string name="nav_terminal">Terminal</string>
+    <string name="nav_keys">SSH Keys</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Connections -->
+    <string name="connections_title">Connections</string>
+    <string name="connections_empty">No connections yet</string>
+    <string name="connections_add">Add Connection</string>
+    <string name="connection_name">Name</string>
+    <string name="connection_host">Host</string>
+    <string name="connection_port">Port</string>
+    <string name="connection_username">Username</string>
+    <string name="connection_protocol">Protocol</string>
+    <string name="connection_auth_method">Authentication</string>
+
+    <!-- Terminal -->
+    <string name="terminal_connecting">Connecting…</string>
+    <string name="terminal_connected">Connected</string>
+    <string name="terminal_disconnected">Disconnected</string>
+    <string name="terminal_error">Connection error</string>
+    <string name="terminal_copy">Copy</string>
+    <string name="terminal_paste">Paste</string>
+    <string name="terminal_select_all">Select All</string>
+
+    <!-- SSH Keys -->
+    <string name="keys_title">SSH Keys</string>
+    <string name="keys_empty">No SSH keys</string>
+    <string name="keys_generate">Generate Key</string>
+    <string name="keys_import">Import Key</string>
+    <string name="key_type">Key Type</string>
+    <string name="key_fingerprint">Fingerprint</string>
+    <string name="key_copy_public">Copy Public Key</string>
+
+    <!-- Biometric -->
+    <string name="biometric_title">Authenticate</string>
+    <string name="biometric_subtitle">Unlock SSH key</string>
+    <string name="biometric_description">Use biometric to access your SSH key</string>
+    <string name="biometric_negative">Cancel</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_terminal">Terminal</string>
+    <string name="settings_security">Security</string>
+    <string name="settings_sync">Sync</string>
+    <string name="settings_about">About</string>
+
+    <!-- Sync -->
+    <string name="sync_title">Sync Settings</string>
+    <string name="sync_google_drive">Google Drive</string>
+    <string name="sync_webdav">WebDAV</string>
+    <string name="sync_last_synced">Last synced: %s</string>
+    <string name="sync_never">Never</string>
+
+    <!-- Common -->
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="delete">Delete</string>
+    <string name="edit">Edit</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="error">Error</string>
+    <string name="ok">OK</string>
+</resources>
