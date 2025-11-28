@@ -145,12 +145,16 @@ class SshTestServerCli : CliktCommand(
             return
         }
 
-        // Initialize pairing manager
+        // Initialize pairing manager with callback to add keys to server's in-memory store
         val serverFingerprint = calculateServerFingerprint(File(config.hostKeyPath))
         pairingManager = PairingManager(
             keyManager = server.keyManager,
             serverPort = config.port,
-            serverFingerprint = serverFingerprint
+            serverFingerprint = serverFingerprint,
+            onKeyAdded = { username, publicKey ->
+                server.addAuthorizedKey(username, publicKey)
+                logger.info("Added pairing key for user '$username' to server's authorized keys")
+            }
         )
 
         println()

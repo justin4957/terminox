@@ -36,7 +36,8 @@ import javax.crypto.spec.SecretKeySpec
 class PairingManager(
     private val keyManager: KeyManager,
     private val serverPort: Int,
-    private val serverFingerprint: String
+    private val serverFingerprint: String,
+    private val onKeyAdded: ((String, java.security.PublicKey) -> Unit)? = null
 ) {
     private val logger = LoggerFactory.getLogger(PairingManager::class.java)
     private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
@@ -129,9 +130,12 @@ class PairingManager(
         val qrCodeData = gson.toJson(payload)
         val qrCodeAscii = generateQrCodeAscii(qrCodeData)
 
-        // Store public key in authorized_keys
+        // Store public key in authorized_keys file and add to server's in-memory store
         val publicKeyOpenSsh = encodePublicKeyOpenSsh(keyPair.public, deviceName)
         addToAuthorizedKeys(publicKeyOpenSsh)
+
+        // Add to server's in-memory authorized keys for immediate authentication
+        onKeyAdded?.invoke(deviceName, keyPair.public)
 
         // Create session
         val sessionId = UUID.randomUUID().toString()
