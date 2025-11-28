@@ -236,7 +236,7 @@ class SshTestServer(
     }
 
     companion object {
-        const val DEFAULT_PORT = 2222
+        const val DEFAULT_PORT = 4075
         const val DEFAULT_HOST_KEY_PATH = "hostkey.ser"
         const val DEFAULT_USERNAME = "testuser"
         const val DEFAULT_PASSWORD = "testpass"

@@ -70,16 +70,16 @@ cd ssh-test-server
 
 3. **Start server with key-only auth**:
    ```bash
-   ./run.sh --no-password -p 2222
+   ./run.sh --no-password
    ```
 
 4. **Configure your router/firewall**:
-   - Forward external port to your machine's port 2222
+   - Forward external port to your machine's port 4075
    - Or use a VPN/tunnel service
 
 5. **In Terminox**, create connection:
    - Host: Your public IP or domain
-   - Port: 2222
+   - Port: 4075
    - Auth: Private Key (import the key file)
 
 ### IP Whitelist Mode (Maximum Security)
@@ -117,7 +117,7 @@ Added 203.0.113.50 to whitelist
 ### Network
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-p, --port` | SSH server port | 2222 |
+| `-p, --port` | SSH server port | 4075 |
 | `-b, --bind` | Bind address | 0.0.0.0 (all) |
 
 ### Authentication
@@ -230,7 +230,7 @@ All security events are logged to `logs/audit.log`:
 
 1. Create new connection in Terminox
 2. Host: `YOUR_IP` or `localhost` (emulator: `10.0.2.2`)
-3. Port: `2222`
+3. Port: `4075`
 4. Username: `testuser`
 5. Auth Method: Password
 6. Password: `testpass`
@@ -242,7 +242,7 @@ All security events are logged to `logs/audit.log`:
 3. In Terminox, import the private key
 4. Create connection with:
    - Host: Your IP
-   - Port: 2222
+   - Port: 4075
    - Username: `myphone`
    - Auth Method: Private Key
    - Select the imported key
@@ -274,8 +274,8 @@ All security events are logged to `logs/audit.log`:
 
 ### Development Setup (Local Network)
 ```bash
-# Simple setup for local development
-./run.sh -p 2222
+# Simple setup for local development (default port 4075)
+./run.sh
 ```
 
 ### Production Setup (Internet Access)

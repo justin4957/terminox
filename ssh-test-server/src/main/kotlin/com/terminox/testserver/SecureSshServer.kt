@@ -47,7 +47,7 @@ class SecureSshServer(
 
     data class ServerConfig(
         /** Port to listen on */
-        val port: Int = 2222,
+        val port: Int = 4075,
         /** Address to bind to (0.0.0.0 for all interfaces, 127.0.0.1 for localhost only) */
         val bindAddress: String = "0.0.0.0",
         /** Path to host key file */

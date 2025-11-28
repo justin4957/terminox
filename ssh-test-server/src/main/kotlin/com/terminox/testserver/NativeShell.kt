@@ -114,7 +114,7 @@ class NativeShell(
 
                 // SSH-specific variables
                 put("SSH_TTY", "/dev/pts/0")
-                put("SSH_CONNECTION", "127.0.0.1 22 127.0.0.1 ${env.env["SSH_CLIENT"]?.split(" ")?.getOrNull(1) ?: "2222"}")
+                put("SSH_CONNECTION", "127.0.0.1 22 127.0.0.1 ${env.env["SSH_CLIENT"]?.split(" ")?.getOrNull(1) ?: "4075"}")
 
                 // Force ls to use terminal-aware output
                 put("CLICOLOR", "1")

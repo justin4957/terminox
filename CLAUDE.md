@@ -165,13 +165,13 @@ cd ssh-test-server
 | Device Type | Host Address | Notes |
 |-------------|--------------|-------|
 | Android Emulator | `10.0.2.2` | Standard emulator host IP |
-| Physical (USB) | `localhost` | After `adb reverse tcp:2222 tcp:2222` |
+| Physical (USB) | `localhost` | After `adb reverse tcp:4075 tcp:4075` |
 | Physical (WiFi) | Computer's LAN IP | Ensure same network |
 
 ### Default Credentials
 - **Username**: `testuser`
 - **Password**: `testpass`
-- **Port**: `2222`
+- **Port**: `4075`
 
 See `ssh-test-server/README.md` for full documentation including security configuration.
 

@@ -29,7 +29,7 @@ class SshTestServerCli : CliktCommand(
     // Network options
     private val port by option("-p", "--port", help = "SSH server port")
         .int()
-        .default(2222)
+        .default(4075)
 
     private val bindAddress by option("-b", "--bind", help = "Address to bind to (0.0.0.0 for all, 127.0.0.1 for localhost)")
         .default("0.0.0.0")
