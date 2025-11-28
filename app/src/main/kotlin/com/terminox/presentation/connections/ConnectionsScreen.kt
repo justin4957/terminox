@@ -5,7 +5,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -29,6 +32,8 @@ fun ConnectionsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    var connectionToEdit by remember { mutableStateOf<Connection?>(null) }
+    var showDeleteConfirmation by remember { mutableStateOf<Connection?>(null) }
 
     Scaffold(
         topBar = {
@@ -80,7 +85,8 @@ fun ConnectionsScreen(
                             ConnectionCard(
                                 connection = connection,
                                 onClick = { onConnectionClick(connection.id) },
-                                onDelete = { viewModel.deleteConnection(connection.id) }
+                                onEdit = { connectionToEdit = connection },
+                                onDelete = { showDeleteConfirmation = connection }
                             )
                         }
                     }
@@ -89,12 +95,55 @@ fun ConnectionsScreen(
         }
     }
 
+    // Add connection dialog
     if (showAddDialog) {
-        AddConnectionDialog(
+        ConnectionDialog(
+            existingConnection = null,
             onDismiss = { showAddDialog = false },
             onSave = { connection ->
                 viewModel.saveConnection(connection)
                 showAddDialog = false
+            }
+        )
+    }
+
+    // Edit connection dialog
+    connectionToEdit?.let { connection ->
+        ConnectionDialog(
+            existingConnection = connection,
+            onDismiss = { connectionToEdit = null },
+            onUpdate = { updatedConnection ->
+                viewModel.updateConnection(updatedConnection)
+                connectionToEdit = null
+            }
+        )
+    }
+
+    // Delete confirmation dialog
+    showDeleteConfirmation?.let { connection ->
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = null },
+            title = { Text(stringResource(R.string.delete)) },
+            text = {
+                Text("Delete connection \"${connection.name}\"?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteConnection(connection.id)
+                        showDeleteConfirmation = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text(stringResource(R.string.delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
             }
         )
     }
@@ -104,32 +153,85 @@ fun ConnectionsScreen(
 fun ConnectionCard(
     connection: Connection,
     onClick: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(start = 16.dp, top = 16.dp, bottom = 16.dp, end = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = connection.name,
-                style = MaterialTheme.typography.titleMedium
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "${connection.username}@${connection.host}:${connection.port}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = connection.protocol.name,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary
-            )
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = connection.name,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${connection.username}@${connection.host}:${connection.port}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = connection.protocol.name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = "More options"
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.edit)) },
+                        onClick = {
+                            showMenu = false
+                            onEdit()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Edit, contentDescription = null)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                stringResource(R.string.delete),
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        },
+                        onClick = {
+                            showMenu = false
+                            onDelete()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    )
+                }
+            }
         }
     }
 }

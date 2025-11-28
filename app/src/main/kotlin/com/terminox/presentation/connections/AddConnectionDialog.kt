@@ -14,20 +14,37 @@ import com.terminox.domain.model.Connection
 import com.terminox.domain.model.ProtocolType
 import java.util.UUID
 
+/**
+ * Dialog for adding or editing a connection.
+ *
+ * @param existingConnection If provided, the dialog will be in edit mode and pre-populate fields
+ * @param onDismiss Called when the dialog is dismissed
+ * @param onSave Called when the connection is saved (for new connections)
+ * @param onUpdate Called when an existing connection is updated (for edit mode)
+ */
 @Composable
-fun AddConnectionDialog(
+fun ConnectionDialog(
+    existingConnection: Connection? = null,
     onDismiss: () -> Unit,
-    onSave: (Connection) -> Unit
+    onSave: (Connection) -> Unit = {},
+    onUpdate: (Connection) -> Unit = {}
 ) {
-    var name by remember { mutableStateOf("") }
-    var host by remember { mutableStateOf("") }
-    var port by remember { mutableStateOf("22") }
-    var username by remember { mutableStateOf("") }
-    var selectedProtocol by remember { mutableStateOf(ProtocolType.SSH) }
+    val isEditMode = existingConnection != null
+
+    var name by remember { mutableStateOf(existingConnection?.name ?: "") }
+    var host by remember { mutableStateOf(existingConnection?.host ?: "") }
+    var port by remember { mutableStateOf(existingConnection?.port?.toString() ?: "22") }
+    var username by remember { mutableStateOf(existingConnection?.username ?: "") }
+    var selectedProtocol by remember { mutableStateOf(existingConnection?.protocol ?: ProtocolType.SSH) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.connections_add)) },
+        title = {
+            Text(
+                if (isEditMode) stringResource(R.string.edit)
+                else stringResource(R.string.connections_add)
+            )
+        },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -84,16 +101,29 @@ fun AddConnectionDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    val connection = Connection(
-                        id = UUID.randomUUID().toString(),
-                        name = name.ifBlank { "$username@$host" },
-                        host = host,
-                        port = port.toIntOrNull() ?: 22,
-                        username = username,
-                        protocol = selectedProtocol,
-                        authMethod = AuthMethod.Password // Default, can be changed later
-                    )
-                    onSave(connection)
+                    if (isEditMode) {
+                        // Update existing connection, preserving authMethod and keyId
+                        val updatedConnection = existingConnection!!.copy(
+                            name = name.ifBlank { "$username@$host" },
+                            host = host,
+                            port = port.toIntOrNull() ?: 22,
+                            username = username,
+                            protocol = selectedProtocol
+                        )
+                        onUpdate(updatedConnection)
+                    } else {
+                        // Create new connection
+                        val newConnection = Connection(
+                            id = UUID.randomUUID().toString(),
+                            name = name.ifBlank { "$username@$host" },
+                            host = host,
+                            port = port.toIntOrNull() ?: 22,
+                            username = username,
+                            protocol = selectedProtocol,
+                            authMethod = AuthMethod.Password
+                        )
+                        onSave(newConnection)
+                    }
                 },
                 enabled = host.isNotBlank() && username.isNotBlank()
             ) {
@@ -105,5 +135,21 @@ fun AddConnectionDialog(
                 Text(stringResource(R.string.cancel))
             }
         }
+    )
+}
+
+/**
+ * Legacy alias for backward compatibility.
+ * Use [ConnectionDialog] for new code.
+ */
+@Composable
+fun AddConnectionDialog(
+    onDismiss: () -> Unit,
+    onSave: (Connection) -> Unit
+) {
+    ConnectionDialog(
+        existingConnection = null,
+        onDismiss = onDismiss,
+        onSave = onSave
     )
 }
