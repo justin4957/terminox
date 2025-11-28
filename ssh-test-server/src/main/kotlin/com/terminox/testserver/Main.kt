@@ -6,12 +6,16 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
+import com.terminox.testserver.pairing.PairingManager
 import com.terminox.testserver.security.AuditLog
 import com.terminox.testserver.security.ConnectionGuard
+import com.terminox.testserver.security.KeyManager
 import org.slf4j.LoggerFactory
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.security.MessageDigest
+import java.util.*
 import java.util.concurrent.CountDownLatch
 
 /**
@@ -75,6 +79,17 @@ class SshTestServerCli : CliktCommand(
 
     private val generateKey by option("--generate-key", help = "Generate a new SSH key pair for a user")
 
+    // Pairing mode
+    private val pairMode by option("--pair", help = "Start in pairing mode for mobile device setup")
+        .flag(default = false)
+
+    private val pairTimeout by option("--pair-timeout", help = "Pairing session timeout in minutes")
+        .int()
+        .default(5)
+
+    // Store pairing manager for interactive commands
+    private var pairingManager: PairingManager? = null
+
     override fun run() {
         // Handle key generation mode
         if (generateKey != null) {
@@ -125,11 +140,24 @@ class SshTestServerCli : CliktCommand(
             return
         }
 
+        // Initialize pairing manager
+        val serverFingerprint = calculateServerFingerprint(File(config.hostKeyPath))
+        pairingManager = PairingManager(
+            keyManager = server.keyManager,
+            serverPort = config.port,
+            serverFingerprint = serverFingerprint
+        )
+
         println()
         printConnectionInfo(server)
         println()
         printSecurityInfo(server)
         println()
+
+        // If --pair mode, immediately start pairing session
+        if (pairMode) {
+            startPairingSession(pairTimeout)
+        }
 
         if (daemon) {
             runAsDaemon(server)
@@ -292,6 +320,20 @@ class SshTestServerCli : CliktCommand(
                     println("Add to Terminox or copy to device:")
                     println(keyInfo.publicKeyOpenSsh)
                 }
+                "pair" -> {
+                    val timeout = args.firstOrNull()?.toIntOrNull() ?: pairTimeout
+                    startPairingSession(timeout)
+                }
+                "pairlist" -> {
+                    listPairingSessions()
+                }
+                "paircancel" -> {
+                    if (args.isNotEmpty()) {
+                        cancelPairingSession(args[0])
+                    } else {
+                        println("Usage: paircancel <session-id>")
+                    }
+                }
                 "whitelist" -> {
                     if (args.isEmpty()) {
                         val status = server.connectionGuard.getStatus()
@@ -348,6 +390,11 @@ class SshTestServerCli : CliktCommand(
             |  User Management:
             |    adduser <u> <p> Add password user
             |    genkey [user]   Generate SSH key pair for user
+            |
+            |  Mobile Pairing (QR Code):
+            |    pair [timeout]  Start QR code pairing session (default: 5 min)
+            |    pairlist        List active pairing sessions
+            |    paircancel <id> Cancel a pairing session
             |
             |  Security:
             |    security        Show security status
@@ -435,6 +482,123 @@ class SshTestServerCli : CliktCommand(
             seconds < 60 -> "${seconds}s"
             seconds < 3600 -> "${seconds / 60}m ${seconds % 60}s"
             else -> "${seconds / 3600}h ${(seconds % 3600) / 60}m"
+        }
+    }
+
+    /**
+     * Calculate server host key fingerprint for pairing verification.
+     */
+    private fun calculateServerFingerprint(hostKeyFile: File): String {
+        return try {
+            if (hostKeyFile.exists()) {
+                val keyBytes = hostKeyFile.readBytes()
+                val digest = MessageDigest.getInstance("SHA-256")
+                val hash = digest.digest(keyBytes)
+                "SHA256:" + Base64.getEncoder().encodeToString(hash).trimEnd('=')
+            } else {
+                "SHA256:pending"
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to calculate server fingerprint", e)
+            "SHA256:unknown"
+        }
+    }
+
+    /**
+     * Start a new pairing session and display QR code.
+     */
+    private fun startPairingSession(timeoutMinutes: Int) {
+        val manager = pairingManager ?: run {
+            println("Error: Pairing manager not initialized")
+            return
+        }
+
+        println()
+        println("╔══════════════════════════════════════════════════════════════╗")
+        println("║                   MOBILE DEVICE PAIRING                      ║")
+        println("╚══════════════════════════════════════════════════════════════╝")
+        println()
+
+        val session = manager.startPairing(
+            deviceName = "mobile-${System.currentTimeMillis() % 10000}",
+            timeoutMinutes = timeoutMinutes
+        )
+
+        println("Scan this QR code with Terminox app:")
+        println()
+        println(session.qrCodeAscii)
+        println()
+        println("╔══════════════════════════════════════════════════════════════╗")
+        println("║  PAIRING CODE: ${session.pairingCode}                                       ║")
+        println("╠══════════════════════════════════════════════════════════════╣")
+        println("║  Enter this 6-digit code in the app after scanning.         ║")
+        println("║  The code expires in $timeoutMinutes minutes.                               ║")
+        println("╚══════════════════════════════════════════════════════════════╝")
+        println()
+        println("Session ID: ${session.sessionId}")
+        println("Client key fingerprint: ${session.clientKeyFingerprint}")
+        println()
+        println("Instructions:")
+        println("  1. Open Terminox app on your mobile device")
+        println("  2. Go to Add Connection > Scan QR Code")
+        println("  3. Scan the QR code above")
+        println("  4. Enter the 6-digit pairing code: ${session.pairingCode}")
+        println("  5. The private key will be securely transferred to your device")
+        println()
+        println("Security Notes:")
+        println("  - The private key is encrypted with your pairing code")
+        println("  - The QR code never contains the decrypted key")
+        println("  - After pairing, the key is stored in Android Keystore")
+        println()
+
+        logger.info("Started pairing session: ${session.sessionId}")
+    }
+
+    /**
+     * List all active pairing sessions.
+     */
+    private fun listPairingSessions() {
+        val manager = pairingManager ?: run {
+            println("Error: Pairing manager not initialized")
+            return
+        }
+
+        val sessions = manager.listActiveSessions()
+        if (sessions.isEmpty()) {
+            println("No active pairing sessions")
+        } else {
+            println("Active pairing sessions:")
+            sessions.forEach { session ->
+                val remainingSeconds = (session.expiresAt - System.currentTimeMillis()) / 1000
+                val status = when {
+                    session.used -> "USED"
+                    remainingSeconds <= 0 -> "EXPIRED"
+                    else -> "ACTIVE (${formatDuration(remainingSeconds)} remaining)"
+                }
+                println("  ${session.sessionId.take(8)}: ${session.deviceName} - $status")
+                println("    Code: ${session.pairingCode}, Attempts: ${session.failedAttempts}/3")
+            }
+        }
+    }
+
+    /**
+     * Cancel a pairing session.
+     */
+    private fun cancelPairingSession(sessionId: String) {
+        val manager = pairingManager ?: run {
+            println("Error: Pairing manager not initialized")
+            return
+        }
+
+        // Find session by prefix match
+        val sessions = manager.listActiveSessions()
+        val matchingSession = sessions.find { it.sessionId.startsWith(sessionId) }
+
+        if (matchingSession != null) {
+            manager.cancelPairing(matchingSession.sessionId)
+            println("Cancelled pairing session: ${matchingSession.sessionId.take(8)}")
+        } else {
+            println("No matching pairing session found for: $sessionId")
         }
     }
 

@@ -44,12 +44,13 @@ class SshKeyRepositoryImpl @Inject constructor(
             val generatedKeyPair = sshKeyGenerator.generateKey(config)
 
             // Encrypt the private key
-            // Pass requiresBiometric to control whether the encryption key requires biometric auth for decryption
+            // For initial storage, we don't require biometric auth - that's for decryption later
+            // The biometric requirement is stored in the database and enforced at decryption time
             val keyAlias = "${KeyEncryptionManager.KEY_PREFIX}${generatedKeyPair.sshKey.id}"
             val encryptedData = keyEncryptionManager.encrypt(
                 keyAlias,
                 generatedKeyPair.privateKeyBytes,
-                config.requiresBiometric
+                requireBiometric = false // Encryption doesn't require biometrics; decryption will
             )
 
             // Store in database
@@ -98,12 +99,13 @@ class SshKeyRepositoryImpl @Inject constructor(
             val privateKeyBytes = privateKey.encoded
 
             // Encrypt the private key
-            // Pass requiresBiometric to control whether the encryption key requires biometric auth for decryption
+            // For initial storage, we don't require biometric auth - that's for decryption later
+            // The biometric requirement is stored in the database and enforced at decryption time
             val keyAlias = "${KeyEncryptionManager.KEY_PREFIX}${generatedPair.sshKey.id}"
             val encryptedData = keyEncryptionManager.encrypt(
                 keyAlias,
                 privateKeyBytes,
-                requiresBiometric
+                requireBiometric = false // Encryption doesn't require biometrics; decryption will
             )
 
             val sshKey = generatedPair.sshKey.copy(
@@ -211,6 +213,17 @@ class SshKeyRepositoryImpl @Inject constructor(
             privateKeyPem.contains("OPENSSH PRIVATE KEY") -> KeyType.ED25519
             privateKeyPem.contains("RSA PRIVATE KEY") -> KeyType.RSA_4096
             privateKeyPem.contains("EC PRIVATE KEY") -> KeyType.ECDSA_256
+            // Generic PKCS#8 "PRIVATE KEY" format - check length to guess type
+            // Ed25519 PKCS#8 is typically ~70 chars base64, RSA much longer
+            privateKeyPem.contains("BEGIN PRIVATE KEY") -> {
+                val base64Content = privateKeyPem
+                    .replace("-----BEGIN PRIVATE KEY-----", "")
+                    .replace("-----END PRIVATE KEY-----", "")
+                    .replace("\\s".toRegex(), "")
+                // Ed25519 PKCS#8 is about 48 bytes = 64 base64 chars
+                // RSA keys are typically 1000+ base64 chars
+                if (base64Content.length < 100) KeyType.ED25519 else KeyType.RSA_4096
+            }
             else -> KeyType.ED25519 // Default
         }
     }

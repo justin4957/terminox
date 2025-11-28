@@ -1,14 +1,17 @@
 package com.terminox.presentation.terminal
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.terminox.domain.model.AuthMethod
 import com.terminox.domain.model.Connection
+import com.terminox.domain.model.KeyType
 import com.terminox.domain.model.ProtocolType
 import com.terminox.domain.model.SessionState
 import com.terminox.domain.model.TerminalSession
 import com.terminox.domain.model.TerminalSize
 import com.terminox.domain.repository.ConnectionRepository
+import com.terminox.domain.repository.SshKeyRepository
 import com.terminox.protocol.ProtocolFactory
 import com.terminox.protocol.TerminalOutput
 import com.terminox.protocol.TerminalProtocol
@@ -17,6 +20,7 @@ import com.terminox.protocol.mosh.MoshProtocolAdapter
 import com.terminox.protocol.ssh.SshProtocolAdapter
 import com.terminox.protocol.terminal.TerminalEmulator
 import com.terminox.protocol.terminal.TerminalState
+import com.terminox.security.KeyEncryptionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,7 +28,19 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import net.i2p.crypto.eddsa.EdDSAPrivateKey
+import net.i2p.crypto.eddsa.EdDSAPublicKey
+import net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable
+import net.i2p.crypto.eddsa.spec.EdDSAPrivateKeySpec
+import net.i2p.crypto.eddsa.spec.EdDSAPublicKeySpec
+import java.security.KeyFactory
+import java.security.PrivateKey
+import java.security.PublicKey
+import java.security.spec.PKCS8EncodedKeySpec
+import java.security.spec.X509EncodedKeySpec
 import javax.inject.Inject
+
+private const val TAG = "TerminalViewModel"
 
 /**
  * Represents a managed session in the UI state.
@@ -60,7 +76,9 @@ data class TerminalUiState(
 @HiltViewModel
 class TerminalViewModel @Inject constructor(
     private val connectionRepository: ConnectionRepository,
-    private val protocolFactory: ProtocolFactory
+    private val protocolFactory: ProtocolFactory,
+    private val sshKeyRepository: SshKeyRepository,
+    private val keyEncryptionManager: KeyEncryptionManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TerminalUiState())
@@ -132,22 +150,28 @@ class TerminalViewModel @Inject constructor(
 
                     updateSessionList()
 
-                    // Check if we need password authentication
-                    if (connection.authMethod is AuthMethod.Password) {
-                        _uiState.update {
-                            it.copy(
-                                sessionState = SessionState.AUTHENTICATING,
-                                showPasswordDialog = true,
-                                activeSessionId = session.sessionId
-                            )
+                    // Check authentication method
+                    when (val authMethod = connection.authMethod) {
+                        is AuthMethod.Password -> {
+                            _uiState.update {
+                                it.copy(
+                                    sessionState = SessionState.AUTHENTICATING,
+                                    showPasswordDialog = true,
+                                    activeSessionId = session.sessionId
+                                )
+                            }
                         }
-                    } else {
-                        // For key-based auth (Phase 3)
-                        _uiState.update {
-                            it.copy(
-                                sessionState = SessionState.ERROR,
-                                error = "Key-based authentication not yet implemented"
-                            )
+                        is AuthMethod.PublicKey -> {
+                            // Authenticate with the stored key
+                            authenticateWithStoredKey(session.sessionId, authMethod.keyId, connection)
+                        }
+                        is AuthMethod.Agent -> {
+                            _uiState.update {
+                                it.copy(
+                                    sessionState = SessionState.ERROR,
+                                    error = "Agent authentication not yet supported"
+                                )
+                            }
                         }
                     }
                 },
@@ -220,6 +244,145 @@ class TerminalViewModel @Inject constructor(
             )
         }
         disconnect()
+    }
+
+    /**
+     * Authenticates using a stored SSH key.
+     */
+    private fun authenticateWithStoredKey(sessionId: String, keyId: String, connection: Connection) {
+        viewModelScope.launch {
+            try {
+                Log.d(TAG, "Starting key authentication for keyId: $keyId")
+
+                // Get the key from repository
+                val sshKey = sshKeyRepository.getKey(keyId)
+                if (sshKey == null) {
+                    Log.e(TAG, "SSH key not found: $keyId")
+                    _uiState.update {
+                        it.copy(
+                            sessionState = SessionState.ERROR,
+                            error = "SSH key not found"
+                        )
+                    }
+                    return@launch
+                }
+                Log.d(TAG, "Found SSH key: ${sshKey.name}, type: ${sshKey.type}")
+
+                // Get encrypted key data
+                val encryptedDataResult = sshKeyRepository.getEncryptedKeyData(keyId)
+                val encryptedData = encryptedDataResult.getOrElse { error ->
+                    Log.e(TAG, "Failed to get encrypted key data", error)
+                    _uiState.update {
+                        it.copy(
+                            sessionState = SessionState.ERROR,
+                            error = "Failed to load key: ${error.message}"
+                        )
+                    }
+                    return@launch
+                }
+
+                // Decrypt the private key
+                val keyAlias = "${KeyEncryptionManager.KEY_PREFIX}$keyId"
+                val cipher = keyEncryptionManager.getDecryptCipher(
+                    keyAlias,
+                    encryptedData.iv,
+                    requireBiometric = false // We're not using biometric during decrypt for now
+                )
+                val decryptedPrivateKeyBytes = cipher.doFinal(encryptedData.encryptedPrivateKey)
+                Log.d(TAG, "Decrypted private key: ${decryptedPrivateKeyBytes.size} bytes")
+
+                // Parse the key pair based on key type
+                val (privateKey, publicKey) = parseKeyPair(decryptedPrivateKeyBytes, sshKey.type)
+                Log.d(TAG, "Parsed key pair successfully")
+
+                // Authenticate with the SSH adapter
+                val result = sshAdapter.authenticateWithKey(sessionId, privateKey, publicKey)
+
+                result.fold(
+                    onSuccess = {
+                        Log.d(TAG, "Key authentication successful")
+                        _uiState.update {
+                            it.copy(
+                                sessionState = SessionState.CONNECTED,
+                                terminalState = currentSession?.emulator?.state?.value ?: TerminalState()
+                            )
+                        }
+
+                        // Update last connected timestamp
+                        connectionRepository.updateLastConnected(
+                            connection.id,
+                            System.currentTimeMillis()
+                        )
+
+                        // Start collecting output
+                        startOutputCollection(sessionId)
+                        updateSessionList()
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Key authentication failed", error)
+                        _uiState.update {
+                            it.copy(
+                                sessionState = SessionState.ERROR,
+                                error = "Key authentication failed: ${error.message}"
+                            )
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Key authentication error", e)
+                _uiState.update {
+                    it.copy(
+                        sessionState = SessionState.ERROR,
+                        error = "Key authentication error: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Parses decrypted private key bytes into a key pair.
+     */
+    private fun parseKeyPair(privateKeyBytes: ByteArray, keyType: KeyType): Pair<PrivateKey, PublicKey> {
+        return when (keyType) {
+            KeyType.ED25519 -> {
+                val spec = EdDSANamedCurveTable.getByName("Ed25519")
+
+                // Extract seed from PKCS#8 if needed
+                val seed = if (privateKeyBytes.size == 32) {
+                    privateKeyBytes
+                } else {
+                    // PKCS#8 encoded - extract the 32-byte seed
+                    privateKeyBytes.copyOfRange(privateKeyBytes.size - 32, privateKeyBytes.size)
+                }
+
+                val privateKeySpec = EdDSAPrivateKeySpec(seed, spec)
+                val privateKey = EdDSAPrivateKey(privateKeySpec)
+
+                // Derive public key from private key
+                val publicKeySpec = EdDSAPublicKeySpec(privateKey.a, spec)
+                val publicKey = EdDSAPublicKey(publicKeySpec)
+
+                Pair(privateKey, publicKey)
+            }
+            KeyType.RSA_2048, KeyType.RSA_4096 -> {
+                val keyFactory = KeyFactory.getInstance("RSA")
+                val privateKeySpec = PKCS8EncodedKeySpec(privateKeyBytes)
+                val privateKey = keyFactory.generatePrivate(privateKeySpec)
+
+                // For RSA, we need to extract public key from PKCS#8 structure
+                // This is a simplification - in a full implementation we'd need to
+                // properly extract or generate the public key
+                throw UnsupportedOperationException("RSA key authentication not yet fully implemented")
+            }
+            KeyType.ECDSA_256, KeyType.ECDSA_384 -> {
+                val keyFactory = KeyFactory.getInstance("EC")
+                val privateKeySpec = PKCS8EncodedKeySpec(privateKeyBytes)
+                val privateKey = keyFactory.generatePrivate(privateKeySpec)
+
+                throw UnsupportedOperationException("ECDSA key authentication not yet fully implemented")
+            }
+        }
     }
 
     private fun startOutputCollection(sessionId: String) {

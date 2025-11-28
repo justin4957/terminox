@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +24,7 @@ fun ConnectionsScreen(
     onConnectionClick: (String) -> Unit,
     onNavigateToKeys: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToQrPairing: () -> Unit,
     viewModel: ConnectionsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -33,6 +35,9 @@ fun ConnectionsScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.connections_title)) },
                 actions = {
+                    IconButton(onClick = onNavigateToQrPairing) {
+                        Icon(Icons.Default.QrCodeScanner, contentDescription = "Scan QR Code")
+                    }
                     IconButton(onClick = onNavigateToKeys) {
                         Icon(Icons.Default.Key, contentDescription = stringResource(R.string.nav_keys))
                     }
