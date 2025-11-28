@@ -4,12 +4,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.terminox.domain.model.AuthMethod
 import com.terminox.domain.model.Connection
+import com.terminox.domain.model.ProtocolType
 import com.terminox.domain.model.SessionState
 import com.terminox.domain.model.TerminalSession
 import com.terminox.domain.model.TerminalSize
 import com.terminox.domain.repository.ConnectionRepository
 import com.terminox.protocol.ProtocolFactory
 import com.terminox.protocol.TerminalOutput
+import com.terminox.protocol.TerminalProtocol
+import com.terminox.protocol.mosh.ConnectionState
+import com.terminox.protocol.mosh.MoshProtocolAdapter
 import com.terminox.protocol.ssh.SshProtocolAdapter
 import com.terminox.protocol.terminal.TerminalEmulator
 import com.terminox.protocol.terminal.TerminalState
@@ -31,7 +35,9 @@ data class SessionUiInfo(
     val connectionName: String,
     val host: String,
     val username: String,
-    val state: SessionState
+    val state: SessionState,
+    val protocolType: ProtocolType = ProtocolType.SSH,
+    val moshState: ConnectionState? = null
 )
 
 data class TerminalUiState(
@@ -44,7 +50,11 @@ data class TerminalUiState(
     val error: String? = null,
     // Multi-session support
     val sessions: List<SessionUiInfo> = emptyList(),
-    val activeSessionId: String? = null
+    val activeSessionId: String? = null,
+    // Protocol info
+    val protocolType: ProtocolType = ProtocolType.SSH,
+    val moshConnectionState: ConnectionState? = null,
+    val moshRtt: Int = -1
 )
 
 @HiltViewModel
@@ -61,7 +71,8 @@ class TerminalViewModel @Inject constructor(
         val session: TerminalSession,
         val connection: Connection,
         val emulator: TerminalEmulator,
-        val outputJob: Job?
+        val outputJob: Job?,
+        val protocolType: ProtocolType = ProtocolType.SSH
     )
 
     private val managedSessions = mutableMapOf<String, ManagedSession>()
@@ -69,6 +80,10 @@ class TerminalViewModel @Inject constructor(
 
     private val sshAdapter: SshProtocolAdapter by lazy {
         protocolFactory.getSshAdapter()
+    }
+
+    private val moshAdapter: MoshProtocolAdapter by lazy {
+        protocolFactory.getMoshAdapter()
     }
 
     fun connect(connectionId: String) {
@@ -90,12 +105,16 @@ class TerminalViewModel @Inject constructor(
                 it.copy(
                     connectionName = connection.name,
                     connectionHost = connection.host,
-                    connectionUsername = connection.username
+                    connectionUsername = connection.username,
+                    protocolType = connection.protocol
                 )
             }
 
-            // Initialize SSH connection
-            val result = sshAdapter.connect(connection)
+            // Initialize connection based on protocol type
+            val result = when (connection.protocol) {
+                ProtocolType.SSH -> sshAdapter.connect(connection)
+                ProtocolType.MOSH -> moshAdapter.connect(connection)
+            }
 
             result.fold(
                 onSuccess = { session ->
@@ -104,7 +123,8 @@ class TerminalViewModel @Inject constructor(
                         session = session,
                         connection = connection,
                         emulator = emulator,
-                        outputJob = null
+                        outputJob = null,
+                        protocolType = connection.protocol
                     )
 
                     managedSessions[session.sessionId] = managed
@@ -149,7 +169,17 @@ class TerminalViewModel @Inject constructor(
 
             val session = currentSession ?: return@launch
 
-            val result = sshAdapter.authenticateWithPassword(session.session.sessionId, password)
+            // Authenticate based on protocol type
+            val result = when (session.protocolType) {
+                ProtocolType.SSH -> sshAdapter.authenticateWithPassword(
+                    session.session.sessionId,
+                    password
+                )
+                ProtocolType.MOSH -> moshAdapter.authenticateWithPassword(
+                    session.session.sessionId,
+                    password
+                )
+            }
 
             result.fold(
                 onSuccess = {
@@ -205,8 +235,14 @@ class TerminalViewModel @Inject constructor(
                 }
             }
 
-            // Collect SSH output
-            sshAdapter.outputFlow(sessionId).collect { output ->
+            // Get appropriate protocol adapter
+            val protocol: TerminalProtocol = when (managed.protocolType) {
+                ProtocolType.SSH -> sshAdapter
+                ProtocolType.MOSH -> moshAdapter
+            }
+
+            // Collect protocol output
+            protocol.outputFlow(sessionId).collect { output ->
                 when (output) {
                     is TerminalOutput.Data -> {
                         managed.emulator.processInput(output.bytes)
@@ -234,7 +270,11 @@ class TerminalViewModel @Inject constructor(
         val session = currentSession ?: return
 
         viewModelScope.launch {
-            sshAdapter.sendInput(session.session.sessionId, text.toByteArray())
+            val protocol: TerminalProtocol = when (session.protocolType) {
+                ProtocolType.SSH -> sshAdapter
+                ProtocolType.MOSH -> moshAdapter
+            }
+            protocol.sendInput(session.session.sessionId, text.toByteArray())
         }
     }
 
@@ -302,7 +342,11 @@ class TerminalViewModel @Inject constructor(
 
         viewModelScope.launch {
             session.emulator.resize(columns, rows)
-            sshAdapter.resize(session.session.sessionId, TerminalSize(columns, rows))
+            val protocol: TerminalProtocol = when (session.protocolType) {
+                ProtocolType.SSH -> sshAdapter
+                ProtocolType.MOSH -> moshAdapter
+            }
+            protocol.resize(session.session.sessionId, TerminalSize(columns, rows))
         }
     }
 
@@ -333,7 +377,11 @@ class TerminalViewModel @Inject constructor(
 
         viewModelScope.launch {
             managed.outputJob?.cancel()
-            sshAdapter.disconnect(sessionId)
+            val protocol: TerminalProtocol = when (managed.protocolType) {
+                ProtocolType.SSH -> sshAdapter
+                ProtocolType.MOSH -> moshAdapter
+            }
+            protocol.disconnect(sessionId)
             managedSessions.remove(sessionId)
 
             // If we closed the current session, switch to another
@@ -347,7 +395,8 @@ class TerminalViewModel @Inject constructor(
                             connectionUsername = newCurrent.connection.username,
                             terminalState = newCurrent.emulator.state.value,
                             activeSessionId = newCurrent.session.sessionId,
-                            sessionState = SessionState.CONNECTED
+                            sessionState = SessionState.CONNECTED,
+                            protocolType = newCurrent.protocolType
                         )
                     }
                 } ?: run {
@@ -368,7 +417,11 @@ class TerminalViewModel @Inject constructor(
 
         viewModelScope.launch {
             session.outputJob?.cancel()
-            sshAdapter.disconnect(session.session.sessionId)
+            val protocol: TerminalProtocol = when (session.protocolType) {
+                ProtocolType.SSH -> sshAdapter
+                ProtocolType.MOSH -> moshAdapter
+            }
+            protocol.disconnect(session.session.sessionId)
             managedSessions.remove(session.session.sessionId)
             currentSession = null
             _uiState.update { it.copy(sessionState = SessionState.DISCONNECTED) }
@@ -390,7 +443,11 @@ class TerminalViewModel @Inject constructor(
                 state = if (id == currentSession?.session?.sessionId)
                     _uiState.value.sessionState
                 else
-                    SessionState.CONNECTED
+                    SessionState.CONNECTED,
+                protocolType = managed.protocolType,
+                moshState = if (managed.protocolType == ProtocolType.MOSH) {
+                    moshAdapter.getConnectionState(id)
+                } else null
             )
         }
         _uiState.update {
@@ -405,13 +462,31 @@ class TerminalViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
+    /**
+     * Notifies the Mosh adapter of network changes for roaming support.
+     */
+    fun onNetworkChanged() {
+        moshAdapter.onNetworkChanged()
+    }
+
+    /**
+     * Forces reconnection for a Mosh session.
+     */
+    fun forceMoshReconnect(sessionId: String) {
+        moshAdapter.forceReconnect(sessionId)
+    }
+
     override fun onCleared() {
         super.onCleared()
         // Close all sessions
         managedSessions.forEach { (sessionId, managed) ->
             managed.outputJob?.cancel()
             viewModelScope.launch {
-                sshAdapter.disconnect(sessionId)
+                val protocol: TerminalProtocol = when (managed.protocolType) {
+                    ProtocolType.SSH -> sshAdapter
+                    ProtocolType.MOSH -> moshAdapter
+                }
+                protocol.disconnect(sessionId)
             }
         }
         managedSessions.clear()
