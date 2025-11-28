@@ -73,14 +73,61 @@ cd ssh-test-server
    ./run.sh --no-password
    ```
 
-4. **Configure your router/firewall**:
-   - Forward external port to your machine's port 4075
-   - Or use a VPN/tunnel service
+4. **Configure network access** (choose one):
+   - **Option A - Tailscale (Recommended)**: See [Tailscale Setup](#tailscale-setup-recommended) below
+   - **Option B - Port forwarding**: Forward external port to your machine's port 4075
+   - **Option C - Other VPN/tunnel**: Use your preferred tunneling service
 
 5. **In Terminox**, create connection:
    - Host: Your public IP or domain
    - Port: 4075
    - Auth: Private Key (import the key file)
+
+### Tailscale Setup (Recommended)
+
+[Tailscale](https://tailscale.com) provides a secure mesh VPN that's ideal for remote SSH access without port forwarding or complex firewall rules.
+
+**Why Tailscale?**
+- **Zero configuration networking**: No port forwarding needed
+- **End-to-end encryption**: Traffic never exposed to the public internet
+- **Works everywhere**: Coffee shops, mobile data, corporate networks
+- **Free tier**: 100 devices for personal use
+
+**Setup:**
+
+1. **Install Tailscale** on your development machine:
+   ```bash
+   # macOS
+   brew install tailscale
+
+   # Linux (Debian/Ubuntu)
+   curl -fsSL https://tailscale.com/install.sh | sh
+   ```
+
+2. **Start Tailscale** and authenticate:
+   ```bash
+   tailscale up
+   ```
+
+3. **Install Tailscale on your Android phone**:
+   - Download from [Google Play Store](https://play.google.com/store/apps/details?id=com.tailscale.ipn)
+   - Sign in with the same account
+
+4. **Start the SSH server with Tailscale**:
+   ```bash
+   # Auto-detects Tailscale and includes it in QR code
+   ./run.sh --pair
+
+   # Explicitly use Tailscale IP for pairing
+   ./run.sh --pair --tailscale
+
+   # Use a custom host (e.g., Tailscale MagicDNS name)
+   ./run.sh --pair --pair-host my-laptop.tailnet-name.ts.net
+   ```
+
+5. **Scan QR code** with Terminox app - the Tailscale IP is automatically included
+
+**Note**: When Tailscale is detected, the QR code will include the Tailscale IP (100.x.x.x range) as the primary host, with local IPs as alternates for LAN connectivity.
 
 ### IP Whitelist Mode (Maximum Security)
 
@@ -142,6 +189,14 @@ Added 203.0.113.50 to whitelist
 |--------|-------------|---------|
 | `-m, --mode` | Shell mode: native/simulated | native |
 | `-s, --shell` | Shell path | auto-detected |
+
+### Pairing & Tailscale
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--pair` | Start QR code pairing session | false |
+| `--pair-timeout` | Pairing session timeout (minutes) | 5 |
+| `--tailscale` | Use Tailscale IP for pairing | false |
+| `--pair-host HOST` | Custom hostname/IP for pairing | auto-detect |
 
 ### Run Mode
 | Option | Description | Default |
@@ -299,6 +354,15 @@ All security events are logged to `logs/audit.log`:
   --max-connections 5 \
   --max-failed-auth 2 \
   --daemon
+```
+
+### Tailscale Remote Access Setup
+```bash
+# Start with QR pairing and Tailscale support
+./run.sh --no-password --pair --tailscale
+
+# With custom Tailscale MagicDNS hostname
+./run.sh --no-password --pair --pair-host my-laptop.tailnet-name.ts.net
 ```
 
 ## License

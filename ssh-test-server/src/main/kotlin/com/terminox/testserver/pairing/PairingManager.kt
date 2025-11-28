@@ -36,7 +36,8 @@ import javax.crypto.spec.SecretKeySpec
 class PairingManager(
     private val keyManager: KeyManager,
     private val serverPort: Int,
-    private val serverFingerprint: String
+    private val serverFingerprint: String,
+    private val onKeyAdded: ((String, java.security.PublicKey) -> Unit)? = null
 ) {
     private val logger = LoggerFactory.getLogger(PairingManager::class.java)
     private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
@@ -57,11 +58,15 @@ class PairingManager(
      *
      * @param deviceName Name for the device/key
      * @param timeoutMinutes How long the pairing is valid
+     * @param useTailscale If true, prioritize Tailscale IP for remote access
+     * @param customHost Optional custom hostname/IP to use instead of auto-detection
      * @return PairingSession with QR code data and pairing code
      */
     fun startPairing(
         deviceName: String = "mobile",
-        timeoutMinutes: Int = DEFAULT_TIMEOUT_MINUTES
+        timeoutMinutes: Int = DEFAULT_TIMEOUT_MINUTES,
+        useTailscale: Boolean = false,
+        customHost: String? = null
     ): PairingSession {
         // Generate new key pair for the device
         val keyPair = generateEd25519KeyPair()
@@ -73,9 +78,35 @@ class PairingManager(
         // Encrypt private key with pairing code
         val encryptedKey = encryptPrivateKey(privateKeyBytes, pairingCode)
 
-        // Get server's local IP addresses
-        val hostAddresses = getLocalIpAddresses()
-        val primaryHost = hostAddresses.firstOrNull() ?: "localhost"
+        // Determine primary host based on options
+        val (primaryHost, alternateHosts) = when {
+            customHost != null -> {
+                logger.info("Using custom host: $customHost")
+                customHost to emptyList<String>()
+            }
+            useTailscale -> {
+                val tailscaleIp = getTailscaleIp()
+                if (tailscaleIp != null) {
+                    logger.info("Using Tailscale IP: $tailscaleIp")
+                    tailscaleIp to getLocalIpAddresses().filter { it != tailscaleIp }
+                } else {
+                    logger.warn("Tailscale requested but not available, falling back to local IP")
+                    val hostAddresses = getLocalIpAddresses()
+                    (hostAddresses.firstOrNull() ?: "localhost") to hostAddresses.drop(1)
+                }
+            }
+            else -> {
+                // Default: prefer Tailscale if available, otherwise use local IP
+                val tailscaleIp = getTailscaleIp()
+                val localAddresses = getLocalIpAddresses().filter { !it.startsWith("100.") }
+                if (tailscaleIp != null) {
+                    logger.info("Tailscale detected, using: $tailscaleIp (local IPs as alternates)")
+                    tailscaleIp to localAddresses
+                } else {
+                    (localAddresses.firstOrNull() ?: "localhost") to localAddresses.drop(1)
+                }
+            }
+        }
 
         // Calculate fingerprint of the generated public key
         val clientKeyFingerprint = calculateFingerprint(keyPair.public.encoded)
@@ -85,7 +116,7 @@ class PairingManager(
             version = 1,
             serverFingerprint = serverFingerprint,
             host = primaryHost,
-            alternateHosts = hostAddresses.drop(1),
+            alternateHosts = alternateHosts,
             port = serverPort,
             username = deviceName,
             encryptedKey = Base64.getEncoder().encodeToString(encryptedKey.ciphertext),
@@ -99,9 +130,12 @@ class PairingManager(
         val qrCodeData = gson.toJson(payload)
         val qrCodeAscii = generateQrCodeAscii(qrCodeData)
 
-        // Store public key in authorized_keys
+        // Store public key in authorized_keys file and add to server's in-memory store
         val publicKeyOpenSsh = encodePublicKeyOpenSsh(keyPair.public, deviceName)
         addToAuthorizedKeys(publicKeyOpenSsh)
+
+        // Add to server's in-memory authorized keys for immediate authentication
+        onKeyAdded?.invoke(deviceName, keyPair.public)
 
         // Create session
         val sessionId = UUID.randomUUID().toString()
@@ -275,6 +309,42 @@ class PairingManager(
             logger.warn("Failed to get local IP addresses", e)
             emptyList()
         }
+    }
+
+    /**
+     * Gets Tailscale IP addresses (100.x.x.x range).
+     * Tailscale uses the CGNAT range 100.64.0.0/10 for its mesh VPN.
+     */
+    private fun getTailscaleIpAddresses(): List<String> {
+        return try {
+            NetworkInterface.getNetworkInterfaces().asSequence()
+                .flatMap { it.inetAddresses.asSequence() }
+                .filter { it is Inet4Address && !it.isLoopbackAddress }
+                .map { it.hostAddress }
+                .filter { ip ->
+                    // Tailscale uses 100.64.0.0/10 (100.64.0.0 - 100.127.255.255)
+                    val parts = ip.split(".").map { it.toIntOrNull() ?: 0 }
+                    parts.size == 4 && parts[0] == 100 && parts[1] in 64..127
+                }
+                .toList()
+        } catch (e: Exception) {
+            logger.warn("Failed to get Tailscale IP addresses", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Checks if Tailscale is available on this system.
+     */
+    fun isTailscaleAvailable(): Boolean {
+        return getTailscaleIpAddresses().isNotEmpty()
+    }
+
+    /**
+     * Gets the primary Tailscale IP, if available.
+     */
+    fun getTailscaleIp(): String? {
+        return getTailscaleIpAddresses().firstOrNull()
     }
 
     private fun generateQrCodeAscii(data: String): String {
