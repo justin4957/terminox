@@ -44,8 +44,13 @@ class SshKeyRepositoryImpl @Inject constructor(
             val generatedKeyPair = sshKeyGenerator.generateKey(config)
 
             // Encrypt the private key
+            // Pass requiresBiometric to control whether the encryption key requires biometric auth for decryption
             val keyAlias = "${KeyEncryptionManager.KEY_PREFIX}${generatedKeyPair.sshKey.id}"
-            val encryptedData = keyEncryptionManager.encrypt(keyAlias, generatedKeyPair.privateKeyBytes)
+            val encryptedData = keyEncryptionManager.encrypt(
+                keyAlias,
+                generatedKeyPair.privateKeyBytes,
+                config.requiresBiometric
+            )
 
             // Store in database
             val entity = SshKeyEntity(
@@ -93,8 +98,13 @@ class SshKeyRepositoryImpl @Inject constructor(
             val privateKeyBytes = privateKey.encoded
 
             // Encrypt the private key
+            // Pass requiresBiometric to control whether the encryption key requires biometric auth for decryption
             val keyAlias = "${KeyEncryptionManager.KEY_PREFIX}${generatedPair.sshKey.id}"
-            val encryptedData = keyEncryptionManager.encrypt(keyAlias, privateKeyBytes)
+            val encryptedData = keyEncryptionManager.encrypt(
+                keyAlias,
+                privateKeyBytes,
+                requiresBiometric
+            )
 
             val sshKey = generatedPair.sshKey.copy(
                 name = name,
