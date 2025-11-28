@@ -354,8 +354,36 @@ class SecureSshServer(
             val defaultKeys = authorizedKeys["default"] ?: emptyList()
             val allKeys = userKeys + defaultKeys
 
+            logger.info("Checking pubkey auth for user '$username': ${allKeys.size} authorized keys available (${userKeys.size} user + ${defaultKeys.size} default)")
+
+            // Extract raw key bytes for comparison (handles different library encodings)
+            val clientKeyRaw = extractRawEd25519Key(key)
+            logger.info("Client key: algorithm=${key.algorithm}, encoded.size=${key.encoded?.size}, rawKey=${clientKeyRaw?.size} bytes")
+            if (clientKeyRaw != null) {
+                logger.info("Client raw key hex: ${clientKeyRaw.joinToString("") { "%02x".format(it) }}")
+            }
+
             val isValid = allKeys.any { authorizedKey ->
-                authorizedKey.encoded.contentEquals(key.encoded)
+                val storedKeyRaw = extractRawEd25519Key(authorizedKey)
+                logger.info("  Comparing with stored key: algorithm=${authorizedKey.algorithm}, encoded.size=${authorizedKey.encoded?.size}, rawKey=${storedKeyRaw?.size} bytes")
+                if (storedKeyRaw != null) {
+                    logger.info("  Stored raw key hex: ${storedKeyRaw.joinToString("") { "%02x".format(it) }}")
+                }
+
+                // First try exact encoded match
+                val encodedMatch = authorizedKey.encoded.contentEquals(key.encoded)
+                if (encodedMatch) {
+                    logger.info("  -> Exact encoded match!")
+                    true
+                } else {
+                    // Fall back to raw key comparison for cross-library compatibility
+                    val rawMatch = clientKeyRaw != null && storedKeyRaw != null &&
+                        clientKeyRaw.contentEquals(storedKeyRaw)
+                    if (rawMatch) {
+                        logger.info("  -> Raw key match!")
+                    }
+                    rawMatch
+                }
             }
 
             if (isValid) {
@@ -365,10 +393,58 @@ class SecureSshServer(
             } else {
                 connectionGuard.recordFailedAuth(remoteAddress, username)
                 auditLog.logAuthAttempt(remoteAddress, username, "publickey", false)
+                logger.warn("Auth failed for $username - client key fingerprint: ${keyFingerprint(key)}")
             }
 
             isValid
         }
+    }
+
+    /**
+     * Extract raw 32-byte Ed25519 public key from various encodings.
+     * Handles both X.509 (Java 15+) and net.i2p.crypto.eddsa formats.
+     */
+    private fun extractRawEd25519Key(key: PublicKey): ByteArray? {
+        val encoded = key.encoded ?: return null
+
+        return when {
+            // X.509 format: 44 bytes (12-byte header + 32-byte key)
+            encoded.size == 44 && encoded[0] == 0x30.toByte() -> {
+                encoded.copyOfRange(12, 44)
+            }
+            // Raw 32-byte key
+            encoded.size == 32 -> encoded
+            // net.i2p.crypto.eddsa format - encoded is typically larger
+            // The raw key is in the last 32 bytes for many formats
+            encoded.size > 32 -> {
+                // Try to find X.509 pattern and extract
+                val x509Marker = byteArrayOf(0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00)
+                val markerIndex = findSubarray(encoded, x509Marker)
+                if (markerIndex >= 0 && markerIndex + 12 + 32 <= encoded.size) {
+                    encoded.copyOfRange(markerIndex + 12, markerIndex + 12 + 32)
+                } else {
+                    // Fall back to last 32 bytes
+                    encoded.copyOfRange(encoded.size - 32, encoded.size)
+                }
+            }
+            else -> null
+        }
+    }
+
+    private fun findSubarray(array: ByteArray, subarray: ByteArray): Int {
+        outer@ for (i in 0..(array.size - subarray.size)) {
+            for (j in subarray.indices) {
+                if (array[i + j] != subarray[j]) continue@outer
+            }
+            return i
+        }
+        return -1
+    }
+
+    private fun keyFingerprint(key: PublicKey): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(key.encoded)
+        return "SHA256:" + java.util.Base64.getEncoder().encodeToString(hash).trimEnd('=')
     }
 
     private fun registerSession(session: ServerSession, username: String, authMethod: String) {
