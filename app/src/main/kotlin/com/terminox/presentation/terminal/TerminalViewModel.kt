@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.terminox.domain.model.AuthMethod
 import com.terminox.domain.model.Connection
+import com.terminox.domain.model.HostVerificationResult
 import com.terminox.domain.model.KeyType
 import com.terminox.domain.model.ProtocolType
 import com.terminox.domain.model.SessionState
@@ -12,6 +13,7 @@ import com.terminox.domain.model.TerminalSession
 import com.terminox.domain.model.TerminalSize
 import com.terminox.domain.repository.ConnectionRepository
 import com.terminox.domain.repository.SshKeyRepository
+import com.terminox.protocol.ssh.HostVerificationException
 import com.terminox.protocol.ProtocolFactory
 import com.terminox.protocol.TerminalOutput
 import com.terminox.protocol.TerminalProtocol
@@ -70,7 +72,10 @@ data class TerminalUiState(
     // Protocol info
     val protocolType: ProtocolType = ProtocolType.SSH,
     val moshConnectionState: ConnectionState? = null,
-    val moshRtt: Int = -1
+    val moshRtt: Int = -1,
+    // Host verification (TOFU)
+    val hostVerification: HostVerificationResult? = null,
+    val pendingConnectionId: String? = null
 )
 
 @HiltViewModel
@@ -176,13 +181,107 @@ class TerminalViewModel @Inject constructor(
                     }
                 },
                 onFailure = { error ->
-                    _uiState.update {
-                        it.copy(
-                            sessionState = SessionState.ERROR,
-                            error = error.message ?: "Connection failed"
-                        )
+                    // Check if this is a host verification issue
+                    if (error is HostVerificationException) {
+                        Log.d(TAG, "Host verification required: ${error.verificationResult}")
+                        _uiState.update {
+                            it.copy(
+                                sessionState = SessionState.DISCONNECTED,
+                                hostVerification = error.verificationResult,
+                                pendingConnectionId = connectionId,
+                                error = null
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                sessionState = SessionState.ERROR,
+                                error = error.message ?: "Connection failed"
+                            )
+                        }
                     }
                 }
+            )
+        }
+    }
+
+    /**
+     * Called when user accepts a new host's fingerprint (TOFU).
+     */
+    fun acceptNewHost() {
+        val verification = _uiState.value.hostVerification
+        val connectionId = _uiState.value.pendingConnectionId
+
+        if (verification is HostVerificationResult.NewHost && connectionId != null) {
+            Log.d(TAG, "User accepted new host: ${verification.host}:${verification.port}")
+
+            // Set the verification result in the adapter
+            sshAdapter.setHostVerificationResult(verification.host, verification.port, true)
+
+            // Clear the dialog and retry connection
+            _uiState.update {
+                it.copy(
+                    hostVerification = null,
+                    pendingConnectionId = null
+                )
+            }
+
+            // Retry the connection - now it will succeed since we set the verification result
+            connect(connectionId)
+        }
+    }
+
+    /**
+     * Called when user accepts a fingerprint change.
+     */
+    fun acceptFingerprintChange() {
+        val verification = _uiState.value.hostVerification
+        val connectionId = _uiState.value.pendingConnectionId
+
+        if (verification is HostVerificationResult.FingerprintChanged && connectionId != null) {
+            Log.d(TAG, "User accepted fingerprint change for: ${verification.host}:${verification.port}")
+
+            // Set the verification result in the adapter
+            sshAdapter.setHostVerificationResult(verification.host, verification.port, true)
+
+            // Clear the dialog and retry connection
+            _uiState.update {
+                it.copy(
+                    hostVerification = null,
+                    pendingConnectionId = null
+                )
+            }
+
+            // Retry the connection
+            connect(connectionId)
+        }
+    }
+
+    /**
+     * Called when user rejects host verification.
+     */
+    fun rejectHostVerification() {
+        val verification = _uiState.value.hostVerification
+
+        if (verification != null) {
+            val (host, port) = when (verification) {
+                is HostVerificationResult.NewHost -> verification.host to verification.port
+                is HostVerificationResult.FingerprintChanged -> verification.host to verification.port
+                else -> null to null
+            }
+
+            if (host != null && port != null) {
+                Log.d(TAG, "User rejected host verification for: $host:$port")
+                sshAdapter.setHostVerificationResult(host, port, false)
+                sshAdapter.clearPendingVerification(host, port)
+            }
+        }
+
+        _uiState.update {
+            it.copy(
+                hostVerification = null,
+                pendingConnectionId = null,
+                sessionState = SessionState.DISCONNECTED
             )
         }
     }

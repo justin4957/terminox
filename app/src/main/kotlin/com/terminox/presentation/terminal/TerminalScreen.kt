@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.terminox.R
+import com.terminox.domain.model.HostVerificationResult
 import com.terminox.domain.model.SessionState
 import com.terminox.presentation.navigation.SessionDrawer
 import com.terminox.presentation.navigation.SessionInfo
@@ -95,6 +96,33 @@ fun TerminalScreen(
                 onNavigateBack()
             }
         )
+    }
+
+    // Host verification dialogs (TOFU)
+    uiState.hostVerification?.let { verification ->
+        when (verification) {
+            is HostVerificationResult.NewHost -> {
+                NewHostVerificationDialog(
+                    hostInfo = verification,
+                    onTrustAndConnect = { viewModel.acceptNewHost() },
+                    onReject = {
+                        viewModel.rejectHostVerification()
+                        onNavigateBack()
+                    }
+                )
+            }
+            is HostVerificationResult.FingerprintChanged -> {
+                FingerprintChangedDialog(
+                    hostInfo = verification,
+                    onUpdateAndConnect = { viewModel.acceptFingerprintChange() },
+                    onReject = {
+                        viewModel.rejectHostVerification()
+                        onNavigateBack()
+                    }
+                )
+            }
+            else -> { /* Trusted - no dialog needed */ }
+        }
     }
 
     // Convert sessions for drawer

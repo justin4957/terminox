@@ -58,6 +58,34 @@
     <string name="sync_last_synced">Last synced: %s</string>
     <string name="sync_never">Never</string>
 
+    <!-- Host Verification (TOFU) -->
+    <string name="host_verification_new_title">New Server Detected</string>
+    <string name="host_verification_new_message">You are connecting to this server for the first time. Please verify the server fingerprint before proceeding.</string>
+    <string name="host_verification_server">Server</string>
+    <string name="host_verification_key_type">Key Type</string>
+    <string name="host_verification_fingerprint">Fingerprint</string>
+    <string name="host_verification_trust_connect">Trust &amp; Connect</string>
+    <string name="host_verification_reject">Cancel</string>
+    <string name="host_verification_changed_title">Server Key Changed</string>
+    <string name="host_verification_changed_message">The server\'s identity has changed since your last connection.\n\nThis could indicate:\n• The server was reinstalled\n• A man-in-the-middle attack\n• Someone is intercepting your connection</string>
+    <string name="host_verification_previous_fingerprint">Previous Fingerprint</string>
+    <string name="host_verification_current_fingerprint">Current Fingerprint</string>
+    <string name="host_verification_update_connect">Update &amp; Connect</string>
+    <string name="host_verification_pinned_warning">This host is pinned. Changing the fingerprint is a security risk.</string>
+
+    <!-- Trusted Hosts -->
+    <string name="trusted_hosts_title">Trusted Hosts</string>
+    <string name="trusted_hosts_empty">No trusted hosts</string>
+    <string name="trusted_hosts_first_seen">First seen</string>
+    <string name="trusted_hosts_last_seen">Last seen</string>
+    <string name="trusted_hosts_trust_level">Trust Level</string>
+    <string name="trusted_hosts_pin">Pin Host</string>
+    <string name="trusted_hosts_unpin">Unpin Host</string>
+    <string name="trusted_hosts_remove">Remove Trust</string>
+    <string name="trusted_hosts_remove_all">Remove All</string>
+    <string name="trusted_hosts_remove_confirm">Remove trust for %s?</string>
+    <string name="trusted_hosts_remove_all_confirm">Remove trust for all hosts? You will need to verify each host again on next connection.</string>
+
     <!-- Common -->
     <string name="save">Save</string>
     <string name="cancel">Cancel</string>
