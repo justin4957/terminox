@@ -86,9 +86,15 @@ class KeyEncryptionManager @Inject constructor(
     /**
      * Encrypts data using the specified key alias.
      * Returns encrypted data with IV prepended.
+     *
+     * @param keyAlias The alias for the encryption key in Android Keystore
+     * @param data The data to encrypt
+     * @param requireBiometric If true, the encryption key will require biometric auth for future decryption.
+     *                         For key generation, this should typically be false to allow initial encryption,
+     *                         and true for keys that need biometric protection when accessed later.
      */
-    fun encrypt(keyAlias: String, data: ByteArray): EncryptedData {
-        val key = getOrCreateEncryptionKey(keyAlias)
+    fun encrypt(keyAlias: String, data: ByteArray, requireBiometric: Boolean = false): EncryptedData {
+        val key = getOrCreateEncryptionKey(keyAlias, requireBiometric)
         val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key)
 
@@ -101,9 +107,12 @@ class KeyEncryptionManager @Inject constructor(
 
     /**
      * Gets a cipher initialized for encryption, suitable for use with BiometricPrompt.
+     *
+     * @param keyAlias The alias for the encryption key
+     * @param requireBiometric If true, the key requires biometric authentication
      */
-    fun getEncryptCipher(keyAlias: String): Cipher {
-        val key = getOrCreateEncryptionKey(keyAlias)
+    fun getEncryptCipher(keyAlias: String, requireBiometric: Boolean = true): Cipher {
+        val key = getOrCreateEncryptionKey(keyAlias, requireBiometric)
         return Cipher.getInstance(AES_GCM_TRANSFORMATION).apply {
             init(Cipher.ENCRYPT_MODE, key)
         }
@@ -111,9 +120,13 @@ class KeyEncryptionManager @Inject constructor(
 
     /**
      * Gets a cipher initialized for decryption, suitable for use with BiometricPrompt.
+     *
+     * @param keyAlias The alias for the encryption key
+     * @param iv The initialization vector used during encryption
+     * @param requireBiometric If true, the key requires biometric authentication
      */
-    fun getDecryptCipher(keyAlias: String, iv: ByteArray): Cipher {
-        val key = getOrCreateEncryptionKey(keyAlias)
+    fun getDecryptCipher(keyAlias: String, iv: ByteArray, requireBiometric: Boolean = true): Cipher {
+        val key = getOrCreateEncryptionKey(keyAlias, requireBiometric)
         return Cipher.getInstance(AES_GCM_TRANSFORMATION).apply {
             init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH, iv))
         }
