@@ -28,6 +28,13 @@ dependencies {
     // CLI argument parsing
     implementation("com.github.ajalt.clikt:clikt:4.2.2")
 
+    // QR code generation for mobile pairing
+    implementation("com.google.zxing:core:3.5.2")
+    implementation("com.google.zxing:javase:3.5.2")
+
+    // JSON serialization for pairing payload
+    implementation("com.google.code.gson:gson:2.10.1")
+
     // Testing
     testImplementation(kotlin("test"))
 }

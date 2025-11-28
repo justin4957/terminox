@@ -114,6 +114,16 @@ dependencies {
     // WorkManager
     implementation(libs.androidx.work.runtime.ktx)
 
+    // QR Code Scanning
+    implementation(libs.mlkit.barcode.scanning)
+    implementation(libs.camerax.camera2)
+    implementation(libs.camerax.lifecycle)
+    implementation(libs.camerax.view)
+    implementation(libs.camerax.mlkit.vision)
+
+    // Accompanist (Compose utilities)
+    implementation(libs.accompanist.permissions)
+
     // Testing
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
