@@ -78,7 +78,9 @@ class SshProtocolAdapter @Inject constructor(
      * This is called synchronously during the SSH handshake.
      */
     private fun handleServerKeyVerification(serverKeyInfo: ServerKeyInfo): VerificationDecision {
+        Log.d(TAG, "=== TOFU VERIFICATION CALLED ===")
         Log.d(TAG, "Verifying server key for ${serverKeyInfo.host}:${serverKeyInfo.port}")
+        Log.d(TAG, "Fingerprint: ${serverKeyInfo.fingerprint}")
 
         // Use runBlocking since we're in a synchronous callback
         val verificationResult = runBlocking {
@@ -100,6 +102,7 @@ class SshProtocolAdapter @Inject constructor(
                 // Store for later retrieval by the ViewModel
                 val pendingKey = "${serverKeyInfo.host}:${serverKeyInfo.port}"
                 pendingVerifications[pendingKey] = verificationResult
+                Log.d(TAG, "Stored pending verification with key: $pendingKey")
 
                 // Check if we already have a decision (from a previous call to setHostVerificationResult)
                 val existingDecision = verificationResults.remove(pendingKey)
@@ -120,6 +123,7 @@ class SshProtocolAdapter @Inject constructor(
                     existingDecision
                 } else {
                     // No decision yet - reject and let ViewModel handle it
+                    Log.d(TAG, "No existing decision, returning REJECT to trigger dialog")
                     VerificationDecision.REJECT
                 }
             }
@@ -173,12 +177,15 @@ class SshProtocolAdapter @Inject constructor(
     fun setHostVerificationResult(host: String, port: Int, accept: Boolean) {
         val key = "$host:$port"
         verificationResults[key] = if (accept) VerificationDecision.ACCEPT else VerificationDecision.REJECT
-        Log.d(TAG, "Set verification result for $key: $accept")
+        // Clear any pending verification since we now have a decision
+        pendingVerifications.remove(key)
+        Log.d(TAG, "Set verification result for $key: $accept, cleared pending verification")
     }
 
     override suspend fun connect(connection: Connection): Result<TerminalSession> = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Connecting to ${connection.host}:${connection.port} as ${connection.username}")
+            Log.d(TAG, "SSH client server key verifier: ${sshClient.serverKeyVerifier?.javaClass?.simpleName}")
             val connectFuture = sshClient.connect(
                 connection.username,
                 connection.host,
@@ -188,9 +195,24 @@ class SshProtocolAdapter @Inject constructor(
             val clientSession = connectFuture.verify(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS).session
             Log.d(TAG, "Session established: ${clientSession.sessionId}")
 
+            // Wait a moment for async key verification to complete
+            // The ServerKeyVerifier runs on a different thread during KEX
+            kotlinx.coroutines.delay(200)
+
+            // Check if there's a pending verification (new host or fingerprint changed)
+            val pendingVerification = getPendingVerification(connection.host, connection.port)
+            if (pendingVerification != null) {
+                Log.d(TAG, "Pending host verification detected after connect: $pendingVerification")
+                // Close the session since we need user confirmation
+                clientSession.close(false)
+                throw HostVerificationException(
+                    "Host verification required for ${connection.host}:${connection.port}",
+                    pendingVerification
+                )
+            }
+
             // If we got here, the server key was accepted
-            // Clear any pending verification
-            clearPendingVerification(connection.host, connection.port)
+            Log.d(TAG, "No pending verification, host is trusted")
 
             // Authenticate based on method
             when (val authMethod = connection.authMethod) {
@@ -226,10 +248,13 @@ class SshProtocolAdapter @Inject constructor(
 
             Result.success(terminalSession)
         } catch (e: Exception) {
-            Log.e(TAG, "Connection failed", e)
+            Log.e(TAG, "Connection failed: ${e.javaClass.simpleName}: ${e.message}", e)
+            Log.d(TAG, "Checking for pending verification for ${connection.host}:${connection.port}")
+            Log.d(TAG, "Pending verifications: ${pendingVerifications.keys}")
 
             // Check if this was a key verification failure
             val pendingVerification = getPendingVerification(connection.host, connection.port)
+            Log.d(TAG, "Found pending verification: $pendingVerification")
             if (pendingVerification != null) {
                 // This is a host verification issue, not a connection error
                 val errorMsg = when (pendingVerification) {

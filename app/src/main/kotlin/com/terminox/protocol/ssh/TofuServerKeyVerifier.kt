@@ -31,10 +31,16 @@ class TofuServerKeyVerifier(
         val keyType = serverKey.algorithm
 
         Log.d(TAG, "Server key received: type=$keyType, fingerprint=$fingerprint")
+        Log.d(TAG, "clientSession.connectAddress: ${clientSession.connectAddress}")
+        Log.d(TAG, "remoteAddress: $remoteAddress")
+
+        val extractedHost = clientSession.connectAddress?.let { extractHost(it) } ?: "unknown"
+        val extractedPort = clientSession.connectAddress?.let { extractPort(it) } ?: 22
+        Log.d(TAG, "Extracted host: $extractedHost, port: $extractedPort")
 
         val keyInfo = ServerKeyInfo(
-            host = clientSession.connectAddress?.let { extractHost(it) } ?: "unknown",
-            port = clientSession.connectAddress?.let { extractPort(it) } ?: 22,
+            host = extractedHost,
+            port = extractedPort,
             fingerprint = fingerprint,
             keyType = keyType,
             publicKey = serverKey
