@@ -7,31 +7,39 @@ import dagger.hilt.android.HiltAndroidApp
 @HiltAndroidApp
 class TerminoxApp : Application() {
 
+    init {
+        // CRITICAL: Set user.home in init block, which runs before onCreate()
+        // and before Hilt can trigger any dependency injection that might
+        // load MINA SSHD classes. Use a temporary directory for now.
+        ensureUserHomeSetEarly()
+    }
+
     override fun onCreate() {
-        // CRITICAL: Set user.home BEFORE super.onCreate() and before any
-        // Apache MINA SSHD classes are loaded. MINA SSHD uses static initializers
-        // that access user.home, and Android doesn't set this property by default.
-        ensureUserHomeSet()
         super.onCreate()
+        // Update user.home to the proper app files directory now that context is available
+        updateUserHome()
     }
 
     /**
-     * Sets the user.home system property to the app's files directory.
-     * This is required for Apache MINA SSHD to function on Android.
-     *
-     * MINA SSHD's PathUtils and related classes use static initializers
-     * that call System.getProperty("user.home"). On Android, this property
-     * is not set, causing crashes with "No user home" errors.
-     *
-     * By setting it here in Application.onCreate(), we ensure it's set
-     * before any MINA SSHD classes can be loaded.
+     * Sets user.home early (before context is available) to prevent MINA SSHD crashes.
+     * Uses /data/local/tmp as a fallback since we don't have filesDir yet.
      */
-    private fun ensureUserHomeSet() {
-        if (System.getProperty("user.home") == null) {
-            val homeDir = filesDir.absolutePath
-            System.setProperty("user.home", homeDir)
-            Log.d(TAG, "Set user.home to: $homeDir")
+    private fun ensureUserHomeSetEarly() {
+        if (System.getProperty("user.home").isNullOrEmpty()) {
+            // Use a temporary path - will be updated in onCreate with proper path
+            System.setProperty("user.home", "/data/local/tmp")
+            Log.d(TAG, "Set early user.home to: /data/local/tmp")
         }
+    }
+
+    /**
+     * Updates user.home to the app's files directory once context is available.
+     * This is the proper location for MINA SSHD to store any config files.
+     */
+    private fun updateUserHome() {
+        val homeDir = filesDir.absolutePath
+        System.setProperty("user.home", homeDir)
+        Log.d(TAG, "Updated user.home to: $homeDir")
     }
 
     companion object {
