@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import kotlinx.coroutines.delay
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -35,7 +36,13 @@ fun PasswordDialog(
     val focusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+        // Delay to allow the dialog to fully compose before requesting focus
+        delay(100)
+        try {
+            focusRequester.requestFocus()
+        } catch (_: IllegalStateException) {
+            // FocusRequester not yet attached, ignore
+        }
     }
 
     AlertDialog(
