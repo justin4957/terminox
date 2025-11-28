@@ -52,6 +52,15 @@ class ConnectionsViewModel @Inject constructor(
         }
     }
 
+    fun updateConnection(connection: Connection) {
+        viewModelScope.launch {
+            connectionRepository.updateConnection(connection)
+                .onFailure { error ->
+                    _uiState.update { it.copy(error = error.message) }
+                }
+        }
+    }
+
     fun deleteConnection(id: String) {
         viewModelScope.launch {
             connectionRepository.deleteConnection(id)
