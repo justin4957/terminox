@@ -139,6 +139,11 @@ GitHub Actions runs on every PR:
 - **build**: Runs `./gradlew assembleDebug`
 - **instrumented-tests**: Runs on emulator (API 34)
 
+## Related Projects
+
+### SSH Test Server
+The SSH test server for development and testing is located at `../ssh-test-server`. This server provides a local SSH endpoint with proper PTY support for testing terminal functionality.
+
 ## Common Issues
 
 ### JDK Version

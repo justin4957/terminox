@@ -104,29 +104,34 @@ fun TerminalCanvas(
             val canvasWidth = size.width
             val canvasHeight = size.height
 
-            // Calculate visible columns and rows
-            val visibleColumns = (canvasWidth / cellDimensions.width).toInt()
-            val visibleRows = (canvasHeight / cellDimensions.height).toInt()
+            // Calculate how many columns/rows fit in the canvas
+            val fittingColumns = (canvasWidth / cellDimensions.width).toInt()
+            val fittingRows = (canvasHeight / cellDimensions.height).toInt()
 
-            // Report size changes
-            if (visibleColumns > 0 && visibleRows > 0) {
-                val newSize = Pair(visibleColumns, visibleRows)
+            // Report size changes to update SSH PTY and emulator
+            if (fittingColumns > 0 && fittingRows > 0) {
+                val newSize = Pair(fittingColumns, fittingRows)
                 if (newSize != lastReportedSize) {
                     lastReportedSize = newSize
-                    onSizeChanged?.invoke(visibleColumns, visibleRows)
+                    onSizeChanged?.invoke(fittingColumns, fittingRows)
                 }
             }
 
-            // Draw each line
+            // Use the terminal emulator's column count for rendering (source of truth)
+            // This ensures rendering matches what the SSH server thinks the width is
+            val renderColumns = terminalState.columns
+            val renderRows = terminalState.rows
+
+            // Draw each line using emulator's dimensions
             terminalState.lines.forEachIndexed { rowIndex, line ->
-                if (rowIndex < visibleRows) {
+                if (rowIndex < renderRows) {
                     drawTerminalLine(
                         line = line,
                         rowIndex = rowIndex,
                         cellDimensions = cellDimensions,
                         textMeasurer = textMeasurer,
                         fontSize = fontSize,
-                        visibleColumns = visibleColumns
+                        visibleColumns = renderColumns
                     )
                 }
             }
