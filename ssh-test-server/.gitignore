@@ -12,6 +12,7 @@ build/
 # Generated files
 hostkey.ser
 logs/
+keys/
 
 # OS files
 .DS_Store

@@ -87,6 +87,11 @@ class SshTestServerCli : CliktCommand(
         .int()
         .default(5)
 
+    private val pairTailscale by option("--tailscale", help = "Use Tailscale IP for pairing (for remote access)")
+        .flag(default = false)
+
+    private val pairHost by option("--pair-host", help = "Custom hostname/IP for pairing QR code")
+
     // Store pairing manager for interactive commands
     private var pairingManager: PairingManager? = null
 
@@ -156,7 +161,7 @@ class SshTestServerCli : CliktCommand(
 
         // If --pair mode, immediately start pairing session
         if (pairMode) {
-            startPairingSession(pairTimeout)
+            startPairingSession(pairTimeout, pairTailscale, pairHost)
         }
 
         if (daemon) {
@@ -507,7 +512,11 @@ class SshTestServerCli : CliktCommand(
     /**
      * Start a new pairing session and display QR code.
      */
-    private fun startPairingSession(timeoutMinutes: Int) {
+    private fun startPairingSession(
+        timeoutMinutes: Int,
+        useTailscale: Boolean = false,
+        customHost: String? = null
+    ) {
         val manager = pairingManager ?: run {
             println("Error: Pairing manager not initialized")
             return
@@ -519,9 +528,28 @@ class SshTestServerCli : CliktCommand(
         println("╚══════════════════════════════════════════════════════════════╝")
         println()
 
+        // Show Tailscale status
+        if (manager.isTailscaleAvailable()) {
+            val tailscaleIp = manager.getTailscaleIp()
+            println("  ✓ Tailscale detected: $tailscaleIp")
+            if (useTailscale) {
+                println("  → Using Tailscale IP for remote access")
+            }
+        } else if (useTailscale) {
+            println("  ⚠ Tailscale requested but not available")
+            println("    Install Tailscale: https://tailscale.com/download")
+        }
+
+        if (customHost != null) {
+            println("  → Using custom host: $customHost")
+        }
+        println()
+
         val session = manager.startPairing(
             deviceName = "mobile-${System.currentTimeMillis() % 10000}",
-            timeoutMinutes = timeoutMinutes
+            timeoutMinutes = timeoutMinutes,
+            useTailscale = useTailscale,
+            customHost = customHost
         )
 
         println("Scan this QR code with Terminox app:")
