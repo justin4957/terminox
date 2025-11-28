@@ -122,8 +122,67 @@ class SshKeyGenerator @Inject constructor() {
 
     private fun parseEd25519PrivateKey(keyBytes: ByteArray): EdDSAPrivateKey {
         val spec = EdDSANamedCurveTable.getByName("Ed25519")
-        val privateKeySpec = EdDSAPrivateKeySpec(keyBytes, spec)
+
+        // Handle PKCS#8 encoded keys (from Java KeyPair.private.encoded)
+        // PKCS#8 Ed25519 keys are typically 48 bytes:
+        // - PKCS#8 header (16 bytes) + 32-byte raw seed
+        // Raw Ed25519 seeds are exactly 32 bytes
+        val seed = if (keyBytes.size == 32) {
+            keyBytes
+        } else if (keyBytes.size >= 48) {
+            // PKCS#8 format: extract the 32-byte seed from the end
+            // The structure is: SEQUENCE { algorithm, OCTET_STRING { seed } }
+            // The seed is in the last 32 bytes after the OCTET_STRING wrapper
+            extractEd25519SeedFromPkcs8(keyBytes)
+        } else {
+            throw IllegalArgumentException("Invalid Ed25519 key size: ${keyBytes.size}")
+        }
+
+        val privateKeySpec = EdDSAPrivateKeySpec(seed, spec)
         return EdDSAPrivateKey(privateKeySpec)
+    }
+
+    /**
+     * Extracts the 32-byte Ed25519 seed from a PKCS#8 encoded key.
+     *
+     * PKCS#8 structure for Ed25519:
+     * SEQUENCE {
+     *   INTEGER 0
+     *   SEQUENCE { OID 1.3.101.112 }  -- Ed25519 OID
+     *   OCTET_STRING { OCTET_STRING { seed(32 bytes) } }
+     * }
+     *
+     * Total is typically 48 bytes, with the seed in the last 32 bytes.
+     */
+    private fun extractEd25519SeedFromPkcs8(pkcs8Bytes: ByteArray): ByteArray {
+        // The seed is wrapped in OCTET_STRING at the end
+        // Standard PKCS#8 Ed25519 format:
+        // 30 2e (SEQUENCE 46 bytes)
+        //   02 01 00 (INTEGER version 0)
+        //   30 05 (SEQUENCE 5 bytes - AlgorithmIdentifier)
+        //     06 03 2b 65 70 (OID 1.3.101.112 = Ed25519)
+        //   04 22 (OCTET STRING 34 bytes)
+        //     04 20 (OCTET STRING 32 bytes - the seed)
+        //       <32 bytes of seed>
+
+        // Look for the pattern: 04 20 followed by 32 bytes at the end
+        if (pkcs8Bytes.size >= 48 &&
+            pkcs8Bytes[pkcs8Bytes.size - 34].toInt() and 0xFF == 0x04 &&
+            pkcs8Bytes[pkcs8Bytes.size - 33].toInt() and 0xFF == 0x20) {
+            return pkcs8Bytes.copyOfRange(pkcs8Bytes.size - 32, pkcs8Bytes.size)
+        }
+
+        // Fallback: try to extract using KeyFactory
+        // This creates a proper EdDSAPrivateKey and extracts the seed
+        try {
+            val keySpec = PKCS8EncodedKeySpec(pkcs8Bytes)
+            val keyFactory = KeyFactory.getInstance("Ed25519")
+            val privateKey = keyFactory.generatePrivate(keySpec)
+            // Get the raw seed bytes from the generated key
+            return privateKey.encoded.copyOfRange(privateKey.encoded.size - 32, privateKey.encoded.size)
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Failed to extract Ed25519 seed from PKCS#8: ${e.message}", e)
+        }
     }
 
     /**

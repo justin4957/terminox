@@ -1,5 +1,6 @@
 package com.terminox.domain.usecase.pairing
 
+import android.util.Log
 import com.terminox.domain.model.AuthMethod
 import com.terminox.domain.model.Connection
 import com.terminox.domain.model.KeyType
@@ -11,6 +12,8 @@ import com.terminox.security.InvalidPairingCodeException
 import com.terminox.security.PairingCrypto
 import java.util.UUID
 import javax.inject.Inject
+
+private const val TAG = "CompletePairingUseCase"
 
 /**
  * Completes the pairing process by decrypting the private key and creating
@@ -41,14 +44,19 @@ class CompletePairingUseCase @Inject constructor(
         connectionName: String? = null,
         requiresBiometric: Boolean = true
     ): Result<PairingResult> {
+        Log.d(TAG, "execute() started - host=${payload.host}, keyType=${payload.keyType}")
+
         // Step 1: Decrypt the private key
+        Log.d(TAG, "Step 1: Decrypting private key")
         val decryptedResult = pairingCrypto.decryptPrivateKey(payload, pairingCode)
         val decryptedData = decryptedResult.getOrElse { error ->
+            Log.e(TAG, "Step 1 FAILED: decryption error", error)
             return when (error) {
                 is InvalidPairingCodeException -> Result.failure(error)
                 else -> Result.failure(error)
             }
         }
+        Log.d(TAG, "Step 1 SUCCESS: key decrypted, ${decryptedData.privateKeyBytes.size} bytes")
 
         // Step 2: Determine key type from payload
         val keyType = when (payload.keyType.uppercase()) {
@@ -59,10 +67,12 @@ class CompletePairingUseCase @Inject constructor(
             "ECDSA-384" -> KeyType.ECDSA_384
             else -> KeyType.ED25519 // Default
         }
+        Log.d(TAG, "Step 2: Key type determined as $keyType")
 
         // Step 3: Import the private key
         val keyName = "paired-${payload.username}-${System.currentTimeMillis() % 10000}"
         val privateKeyPem = formatPrivateKeyAsPem(decryptedData.privateKeyBytes, keyType)
+        Log.d(TAG, "Step 3: Importing key '$keyName'")
 
         val importResult = sshKeyRepository.importKey(
             name = keyName,
@@ -71,12 +81,15 @@ class CompletePairingUseCase @Inject constructor(
         )
 
         val sshKey = importResult.getOrElse { error ->
+            Log.e(TAG, "Step 3 FAILED: import error", error)
             return Result.failure(KeyImportException("Failed to import key: ${error.message}", error))
         }
+        Log.d(TAG, "Step 3 SUCCESS: key imported, id=${sshKey.id}")
 
         // Step 4: Create connection profile
         val finalConnectionName = connectionName ?: "${payload.username}@${payload.host}"
         val connectionId = UUID.randomUUID().toString()
+        Log.d(TAG, "Step 4: Creating connection '$finalConnectionName'")
 
         val connection = Connection(
             id = connectionId,
@@ -90,10 +103,12 @@ class CompletePairingUseCase @Inject constructor(
 
         val connectionResult = connectionRepository.saveConnection(connection)
         connectionResult.getOrElse { error ->
+            Log.e(TAG, "Step 4 FAILED: connection save error", error)
             // Clean up the imported key if connection creation fails
             sshKeyRepository.deleteKey(sshKey.id)
             return Result.failure(ConnectionCreationException("Failed to create connection: ${error.message}", error))
         }
+        Log.d(TAG, "Step 4 SUCCESS: connection saved")
 
         return Result.success(
             PairingResult(

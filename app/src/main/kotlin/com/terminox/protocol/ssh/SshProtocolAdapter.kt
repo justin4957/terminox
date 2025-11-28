@@ -79,8 +79,9 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
                     // For now, we'll need to handle this in the UI layer
                 }
                 is AuthMethod.PublicKey -> {
-                    // Key-based auth will be implemented in Phase 3
-                    throw UnsupportedOperationException("Public key auth will be implemented in Phase 3")
+                    // Key-based auth - the ViewModel will call authenticateWithKey
+                    // after retrieving the key from the repository
+                    Log.d(TAG, "Connection uses PublicKey auth with keyId: ${authMethod.keyId}")
                 }
                 is AuthMethod.Agent -> {
                     throw UnsupportedOperationException("Agent auth not yet supported")

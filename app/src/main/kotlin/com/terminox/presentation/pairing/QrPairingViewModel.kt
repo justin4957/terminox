@@ -1,5 +1,6 @@
 package com.terminox.presentation.pairing
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.terminox.domain.model.pairing.PairingPayload
@@ -14,6 +15,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
+
+private const val TAG = "QrPairingViewModel"
 
 /**
  * ViewModel for the QR code pairing screen.
@@ -57,10 +60,14 @@ class QrPairingViewModel @Inject constructor(
     fun onQrCodeScanned(qrContent: String) {
         viewModelScope.launch {
             try {
+                Log.d(TAG, "QR code scanned, content length: ${qrContent.length}")
+                Log.d(TAG, "QR content: $qrContent")
                 val payload = json.decodeFromString<PairingPayload>(qrContent)
+                Log.d(TAG, "Payload decoded: host=${payload.host}, port=${payload.port}, version=${payload.version}")
 
                 // Validate payload version
                 if (payload.version != 1) {
+                    Log.e(TAG, "Unsupported version: ${payload.version}")
                     _state.value = PairingState.Error("Unsupported pairing protocol version: ${payload.version}")
                     return@launch
                 }
@@ -68,6 +75,7 @@ class QrPairingViewModel @Inject constructor(
                 currentPayload = payload
                 _state.value = PairingState.ScannedAwaitingCode(payload)
             } catch (e: Exception) {
+                Log.e(TAG, "Failed to parse QR code", e)
                 _state.value = PairingState.Error("Invalid QR code format: ${e.message}")
             }
         }
@@ -94,21 +102,25 @@ class QrPairingViewModel @Inject constructor(
      */
     fun submitPairingCode() {
         val payload = currentPayload ?: run {
+            Log.e(TAG, "No current payload")
             _state.value = PairingState.Error("No QR code scanned")
             return
         }
 
         val code = _pairingCode.value
         if (code.length != 6) {
+            Log.e(TAG, "Invalid code length: ${code.length}")
             _state.value = PairingState.Error("Please enter the complete 6-digit pairing code")
             return
         }
 
+        Log.d(TAG, "Submitting pairing code for host=${payload.host}")
         _state.value = PairingState.Decrypting
 
         viewModelScope.launch {
             _state.value = PairingState.ImportingKey(payload)
 
+            Log.d(TAG, "Calling completePairingUseCase.execute()")
             val result = completePairingUseCase.execute(
                 payload = payload,
                 pairingCode = code,
@@ -117,12 +129,14 @@ class QrPairingViewModel @Inject constructor(
 
             result.fold(
                 onSuccess = { pairingResult ->
+                    Log.d(TAG, "Pairing SUCCESS: connectionId=${pairingResult.connectionId}")
                     _state.value = PairingState.Success(
                         connectionId = pairingResult.connectionId,
                         keyName = pairingResult.keyName
                     )
                 },
                 onFailure = { error ->
+                    Log.e(TAG, "Pairing FAILED", error)
                     val message = when (error) {
                         is InvalidPairingCodeException -> "Incorrect pairing code. Please check and try again."
                         else -> "Pairing failed: ${error.message}"
