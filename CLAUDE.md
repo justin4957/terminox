@@ -139,10 +139,41 @@ GitHub Actions runs on every PR:
 - **build**: Runs `./gradlew assembleDebug`
 - **instrumented-tests**: Runs on emulator (API 34)
 
-## Related Projects
+## SSH Test Server
 
-### SSH Test Server
-The SSH test server for development and testing is located at `../ssh-test-server`. This server provides a local SSH endpoint with proper PTY support for testing terminal functionality.
+An integrated SSH test server is included in `ssh-test-server/` for development and testing. This provides a local SSH endpoint with proper PTY support for testing terminal functionality.
+
+### Quick Start
+
+```bash
+# Build the server
+cd ssh-test-server
+./gradlew compileKotlin jar
+
+# Generate SSH key for mobile testing
+./run.sh --generate-key mobile
+
+# Run with password auth (development)
+./run.sh
+
+# Run with key-only auth (production/internet)
+./run.sh --no-password
+```
+
+### Testing with Terminox
+
+| Device Type | Host Address | Notes |
+|-------------|--------------|-------|
+| Android Emulator | `10.0.2.2` | Standard emulator host IP |
+| Physical (USB) | `localhost` | After `adb reverse tcp:2222 tcp:2222` |
+| Physical (WiFi) | Computer's LAN IP | Ensure same network |
+
+### Default Credentials
+- **Username**: `testuser`
+- **Password**: `testpass`
+- **Port**: `2222`
+
+See `ssh-test-server/README.md` for full documentation including security configuration.
 
 ## Common Issues
 
