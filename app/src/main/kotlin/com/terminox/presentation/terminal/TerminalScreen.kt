@@ -334,6 +334,9 @@ fun TerminalScreen(
                                     terminalState = uiState.terminalState,
                                     modifier = Modifier.fillMaxSize(),
                                     fontSize = fontSize,
+                                    theme = theme,
+                                    cursorStyle = settings.cursorStyle,
+                                    cursorBlink = settings.cursorBlink,
                                     selection = selection,
                                     scrollOffset = scrollOffset,
                                     onSizeChanged = { columns, rows ->

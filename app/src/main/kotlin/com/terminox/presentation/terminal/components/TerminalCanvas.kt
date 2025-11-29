@@ -27,6 +27,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.terminox.domain.model.CursorStyle
+import com.terminox.domain.model.TerminalTheme
+import com.terminox.domain.model.TerminalThemes
 import com.terminox.protocol.terminal.TerminalColor
 import com.terminox.protocol.terminal.TerminalLine
 import com.terminox.protocol.terminal.TerminalState
@@ -42,6 +45,9 @@ fun TerminalCanvas(
     terminalState: TerminalState,
     modifier: Modifier = Modifier,
     fontSize: Float = 14f,
+    theme: TerminalTheme = TerminalThemes.TERMINOX_DARK,
+    cursorStyle: CursorStyle = CursorStyle.BLOCK,
+    cursorBlink: Boolean = true,
     selection: TextSelection? = null,
     scrollOffset: Int = 0,
     onSizeChanged: ((columns: Int, rows: Int) -> Unit)? = null,
@@ -59,14 +65,14 @@ fun TerminalCanvas(
     // Cursor blink state
     var cursorVisible by remember { mutableStateOf(true) }
 
-    LaunchedEffect(terminalState.cursorVisible) {
-        if (terminalState.cursorVisible) {
+    LaunchedEffect(terminalState.cursorVisible, cursorBlink) {
+        if (terminalState.cursorVisible && cursorBlink) {
             while (true) {
                 delay(530)
                 cursorVisible = !cursorVisible
             }
         } else {
-            cursorVisible = false
+            cursorVisible = terminalState.cursorVisible
         }
     }
 
@@ -77,7 +83,7 @@ fun TerminalCanvas(
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFF1A1A2E))
+            .background(theme.background)
             .terminalGestures(
                 screenWidth = screenWidth,
                 onGesture = { gesture ->
@@ -131,7 +137,8 @@ fun TerminalCanvas(
                         cellDimensions = cellDimensions,
                         textMeasurer = textMeasurer,
                         fontSize = fontSize,
-                        visibleColumns = renderColumns
+                        visibleColumns = renderColumns,
+                        theme = theme
                     )
                 }
             }
@@ -141,7 +148,9 @@ fun TerminalCanvas(
                 drawCursor(
                     row = terminalState.cursorRow,
                     column = terminalState.cursorColumn,
-                    cellDimensions = cellDimensions
+                    cellDimensions = cellDimensions,
+                    cursorStyle = cursorStyle,
+                    cursorColor = theme.cursor
                 )
             }
         }
@@ -191,7 +200,8 @@ private fun DrawScope.drawTerminalLine(
     cellDimensions: CellDimensions,
     textMeasurer: TextMeasurer,
     fontSize: Float,
-    visibleColumns: Int
+    visibleColumns: Int,
+    theme: TerminalTheme
 ) {
     val y = rowIndex * cellDimensions.height
 
@@ -204,9 +214,9 @@ private fun DrawScope.drawTerminalLine(
         // Draw background if not default
         if (style.background != TerminalColor.Default) {
             val bgColor = if (style.attributes.inverse) {
-                style.foreground.toComposeColor()
+                style.foreground.toComposeColor(theme)
             } else {
-                style.background.toComposeColor()
+                style.background.toComposeColor(theme)
             }
 
             drawRect(
@@ -219,9 +229,9 @@ private fun DrawScope.drawTerminalLine(
         // Draw character
         if (cell.character != ' ') {
             val fgColor = if (style.attributes.inverse) {
-                style.background.toComposeColor()
+                if (style.background == TerminalColor.Default) theme.background else style.background.toComposeColor(theme)
             } else {
-                style.foreground.toComposeColor()
+                if (style.foreground == TerminalColor.Default) theme.foreground else style.foreground.toComposeColor(theme)
             }
 
             val textStyle = TextStyle(
@@ -265,17 +275,38 @@ private fun DrawScope.drawTerminalLine(
 private fun DrawScope.drawCursor(
     row: Int,
     column: Int,
-    cellDimensions: CellDimensions
+    cellDimensions: CellDimensions,
+    cursorStyle: CursorStyle,
+    cursorColor: Color
 ) {
     val x = column * cellDimensions.width
     val y = row * cellDimensions.height
 
-    // Block cursor
-    drawRect(
-        color = Color(0xFF00FF00).copy(alpha = 0.7f),
-        topLeft = Offset(x, y),
-        size = Size(cellDimensions.width, cellDimensions.height)
-    )
+    when (cursorStyle) {
+        CursorStyle.BLOCK -> {
+            drawRect(
+                color = cursorColor.copy(alpha = 0.7f),
+                topLeft = Offset(x, y),
+                size = Size(cellDimensions.width, cellDimensions.height)
+            )
+        }
+        CursorStyle.UNDERLINE -> {
+            val underlineHeight = 2f
+            drawRect(
+                color = cursorColor,
+                topLeft = Offset(x, y + cellDimensions.height - underlineHeight),
+                size = Size(cellDimensions.width, underlineHeight)
+            )
+        }
+        CursorStyle.BAR -> {
+            val barWidth = 2f
+            drawRect(
+                color = cursorColor,
+                topLeft = Offset(x, y),
+                size = Size(barWidth, cellDimensions.height)
+            )
+        }
+    }
 }
 
 /**
