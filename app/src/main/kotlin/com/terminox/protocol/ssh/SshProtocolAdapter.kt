@@ -3,10 +3,13 @@ package com.terminox.protocol.ssh
 import android.util.Log
 import com.terminox.domain.model.AuthMethod
 import com.terminox.domain.model.Connection
+import com.terminox.domain.model.HostVerificationResult
 import com.terminox.domain.model.ProtocolType
 import com.terminox.domain.model.SessionState
 import com.terminox.domain.model.TerminalSession
 import com.terminox.domain.model.TerminalSize
+import com.terminox.domain.model.TrustLevel
+import com.terminox.domain.repository.TrustedHostRepository
 import com.terminox.protocol.TerminalOutput
 import com.terminox.protocol.TerminalProtocol
 import kotlinx.coroutines.Dispatchers
@@ -14,11 +17,11 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.apache.sshd.client.SshClient
 import org.apache.sshd.client.channel.ChannelShell
 import org.apache.sshd.client.config.hosts.HostConfigEntryResolver
-import org.apache.sshd.client.keyverifier.AcceptAllServerKeyVerifier
 import org.apache.sshd.client.session.ClientSession
 import org.apache.sshd.common.keyprovider.KeyIdentityProvider
 import java.io.InputStream
@@ -41,28 +44,152 @@ import javax.inject.Singleton
  * before any MINA SSHD static initializers run.
  */
 @Singleton
-class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
+class SshProtocolAdapter @Inject constructor(
+    private val trustedHostRepository: TrustedHostRepository
+) : TerminalProtocol {
 
     override val protocolType = ProtocolType.SSH
+
+    // Pending host verifications - used to pass verification results to the ViewModel
+    private val pendingVerifications = ConcurrentHashMap<String, HostVerificationResult>()
+    private val verificationResults = ConcurrentHashMap<String, VerificationDecision>()
 
     private val sshClient: SshClient by lazy {
         Log.d(TAG, "Creating SSH client using setUpDefaultClient()")
         SshClient.setUpDefaultClient().apply {
             // Override settings that would try to access the filesystem
             hostConfigEntryResolver = HostConfigEntryResolver.EMPTY
-            serverKeyVerifier = AcceptAllServerKeyVerifier.INSTANCE
             keyIdentityProvider = KeyIdentityProvider.EMPTY_KEYS_PROVIDER
 
-            Log.d(TAG, "SSH client configured")
+            // Use TOFU server key verifier
+            serverKeyVerifier = TofuServerKeyVerifier { serverKeyInfo ->
+                handleServerKeyVerification(serverKeyInfo)
+            }
+
+            Log.d(TAG, "SSH client configured with TOFU verification")
             start()
         }
     }
 
     private val sessions = ConcurrentHashMap<String, SshSessionHolder>()
 
+    /**
+     * Handles server key verification by checking against the trust store.
+     * This is called synchronously during the SSH handshake.
+     */
+    private fun handleServerKeyVerification(serverKeyInfo: ServerKeyInfo): VerificationDecision {
+        Log.d(TAG, "=== TOFU VERIFICATION CALLED ===")
+        Log.d(TAG, "Verifying server key for ${serverKeyInfo.host}:${serverKeyInfo.port}")
+        Log.d(TAG, "Fingerprint: ${serverKeyInfo.fingerprint}")
+
+        // Use runBlocking since we're in a synchronous callback
+        val verificationResult = runBlocking {
+            trustedHostRepository.verifyHost(
+                host = serverKeyInfo.host,
+                port = serverKeyInfo.port,
+                fingerprint = serverKeyInfo.fingerprint,
+                keyType = serverKeyInfo.keyType
+            )
+        }
+
+        return when (verificationResult) {
+            is HostVerificationResult.Trusted -> {
+                Log.d(TAG, "Host is trusted, allowing connection")
+                VerificationDecision.ACCEPT
+            }
+            is HostVerificationResult.NewHost -> {
+                Log.d(TAG, "New host detected, storing for user confirmation")
+                // Store for later retrieval by the ViewModel
+                val pendingKey = "${serverKeyInfo.host}:${serverKeyInfo.port}"
+                pendingVerifications[pendingKey] = verificationResult
+                Log.d(TAG, "Stored pending verification with key: $pendingKey")
+
+                // Check if we already have a decision (from a previous call to setHostVerificationResult)
+                val existingDecision = verificationResults[pendingKey]
+                if (existingDecision == VerificationDecision.ACCEPT) {
+                    Log.d(TAG, "Found existing ACCEPT decision, trusting host")
+                    // User already approved - trust the host
+                    runBlocking {
+                        trustedHostRepository.trustHost(
+                            host = serverKeyInfo.host,
+                            port = serverKeyInfo.port,
+                            fingerprint = serverKeyInfo.fingerprint,
+                            keyType = serverKeyInfo.keyType,
+                            trustLevel = TrustLevel.TRUSTED
+                        )
+                    }
+                    // Clear the pending verification since we've handled it
+                    pendingVerifications.remove(pendingKey)
+                    VerificationDecision.ACCEPT
+                } else {
+                    // No decision yet - ACCEPT to allow connection to proceed
+                    // The pending verification will be checked after connect() returns
+                    Log.d(TAG, "No existing decision, accepting temporarily for dialog")
+                    VerificationDecision.ACCEPT
+                }
+            }
+            is HostVerificationResult.FingerprintChanged -> {
+                Log.w(TAG, "Host fingerprint changed! Storing for user confirmation")
+                val pendingKey = "${serverKeyInfo.host}:${serverKeyInfo.port}"
+                pendingVerifications[pendingKey] = verificationResult
+                Log.d(TAG, "Stored pending fingerprint change verification with key: $pendingKey")
+
+                // Check if we already have a decision
+                val existingDecision = verificationResults[pendingKey]
+                if (existingDecision == VerificationDecision.ACCEPT) {
+                    Log.d(TAG, "Found existing ACCEPT decision for fingerprint change")
+                    // User accepted the change - update the fingerprint
+                    runBlocking {
+                        trustedHostRepository.updateFingerprint(
+                            host = serverKeyInfo.host,
+                            port = serverKeyInfo.port,
+                            newFingerprint = serverKeyInfo.fingerprint,
+                            keyType = serverKeyInfo.keyType
+                        )
+                    }
+                    // Clear the pending verification since we've handled it
+                    pendingVerifications.remove(pendingKey)
+                    VerificationDecision.ACCEPT
+                } else {
+                    // No decision yet - ACCEPT to allow connection to proceed
+                    // The pending verification will be checked after connect() returns
+                    Log.d(TAG, "No existing decision for fingerprint change, accepting temporarily for dialog")
+                    VerificationDecision.ACCEPT
+                }
+            }
+        }
+    }
+
+    /**
+     * Gets the pending host verification for a connection, if any.
+     */
+    fun getPendingVerification(host: String, port: Int): HostVerificationResult? {
+        return pendingVerifications["$host:$port"]
+    }
+
+    /**
+     * Clears a pending host verification.
+     */
+    fun clearPendingVerification(host: String, port: Int) {
+        pendingVerifications.remove("$host:$port")
+    }
+
+    /**
+     * Sets the host verification result before attempting connection.
+     * Call this after user approves or rejects a new host/fingerprint change.
+     */
+    fun setHostVerificationResult(host: String, port: Int, accept: Boolean) {
+        val key = "$host:$port"
+        verificationResults[key] = if (accept) VerificationDecision.ACCEPT else VerificationDecision.REJECT
+        // Clear any pending verification since we now have a decision
+        pendingVerifications.remove(key)
+        Log.d(TAG, "Set verification result for $key: $accept, cleared pending verification")
+    }
+
     override suspend fun connect(connection: Connection): Result<TerminalSession> = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Connecting to ${connection.host}:${connection.port} as ${connection.username}")
+            Log.d(TAG, "SSH client server key verifier: ${sshClient.serverKeyVerifier?.javaClass?.simpleName}")
             val connectFuture = sshClient.connect(
                 connection.username,
                 connection.host,
@@ -71,6 +198,33 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
             Log.d(TAG, "Connect future created, waiting for verification...")
             val clientSession = connectFuture.verify(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS).session
             Log.d(TAG, "Session established: ${clientSession.sessionId}")
+
+            // Wait a moment for async key verification to complete
+            // The ServerKeyVerifier runs on a different thread during KEX
+            kotlinx.coroutines.delay(200)
+
+            // Check if there's a pending verification (new host or fingerprint changed)
+            // But skip if we already have a positive decision (user already approved)
+            val key = "${connection.host}:${connection.port}"
+            val hasPositiveDecision = verificationResults[key] == VerificationDecision.ACCEPT
+            val pendingVerification = getPendingVerification(connection.host, connection.port)
+
+            if (pendingVerification != null && !hasPositiveDecision) {
+                Log.d(TAG, "Pending host verification detected after connect: $pendingVerification")
+                // Close the session since we need user confirmation
+                clientSession.close(false)
+                throw HostVerificationException(
+                    "Host verification required for ${connection.host}:${connection.port}",
+                    pendingVerification
+                )
+            }
+
+            // Clear the verification result now that we've used it
+            verificationResults.remove(key)
+            pendingVerifications.remove(key)
+
+            // If we got here, the server key was accepted
+            Log.d(TAG, "No pending verification, host is trusted")
 
             // Authenticate based on method
             when (val authMethod = connection.authMethod) {
@@ -106,8 +260,26 @@ class SshProtocolAdapter @Inject constructor() : TerminalProtocol {
 
             Result.success(terminalSession)
         } catch (e: Exception) {
-            Log.e(TAG, "Connection failed", e)
-            Result.failure(e)
+            Log.e(TAG, "Connection failed: ${e.javaClass.simpleName}: ${e.message}", e)
+            Log.d(TAG, "Checking for pending verification for ${connection.host}:${connection.port}")
+            Log.d(TAG, "Pending verifications: ${pendingVerifications.keys}")
+
+            // Check if this was a key verification failure
+            val pendingVerification = getPendingVerification(connection.host, connection.port)
+            Log.d(TAG, "Found pending verification: $pendingVerification")
+            if (pendingVerification != null) {
+                // This is a host verification issue, not a connection error
+                val errorMsg = when (pendingVerification) {
+                    is HostVerificationResult.NewHost ->
+                        "HOST_VERIFICATION_REQUIRED:${connection.host}:${connection.port}"
+                    is HostVerificationResult.FingerprintChanged ->
+                        "HOST_FINGERPRINT_CHANGED:${connection.host}:${connection.port}"
+                    else -> e.message ?: "Connection failed"
+                }
+                Result.failure(HostVerificationException(errorMsg, pendingVerification))
+            } else {
+                Result.failure(e)
+            }
         }
     }
 
@@ -295,3 +467,11 @@ data class SshSessionHolder(
     val inputStream: InputStream?,
     val outputStream: OutputStream?
 )
+
+/**
+ * Exception thrown when host verification fails and requires user action.
+ */
+class HostVerificationException(
+    message: String,
+    val verificationResult: HostVerificationResult
+) : Exception(message)

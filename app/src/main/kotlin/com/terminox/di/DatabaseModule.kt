@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.terminox.data.local.database.AppDatabase
 import com.terminox.data.local.database.dao.ConnectionDao
 import com.terminox.data.local.database.dao.SshKeyDao
+import com.terminox.data.local.database.dao.TrustedHostDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -38,5 +39,10 @@ object DatabaseModule {
     @Provides
     fun provideSshKeyDao(database: AppDatabase): SshKeyDao {
         return database.sshKeyDao()
+    }
+
+    @Provides
+    fun provideTrustedHostDao(database: AppDatabase): TrustedHostDao {
+        return database.trustedHostDao()
     }
 }
