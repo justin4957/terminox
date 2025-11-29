@@ -105,52 +105,56 @@ class SshProtocolAdapter @Inject constructor(
                 Log.d(TAG, "Stored pending verification with key: $pendingKey")
 
                 // Check if we already have a decision (from a previous call to setHostVerificationResult)
-                val existingDecision = verificationResults.remove(pendingKey)
-                if (existingDecision != null) {
-                    Log.d(TAG, "Found existing verification decision: $existingDecision")
-                    if (existingDecision == VerificationDecision.ACCEPT) {
-                        // User already approved - trust the host
-                        runBlocking {
-                            trustedHostRepository.trustHost(
-                                host = serverKeyInfo.host,
-                                port = serverKeyInfo.port,
-                                fingerprint = serverKeyInfo.fingerprint,
-                                keyType = serverKeyInfo.keyType,
-                                trustLevel = TrustLevel.TRUSTED
-                            )
-                        }
+                val existingDecision = verificationResults[pendingKey]
+                if (existingDecision == VerificationDecision.ACCEPT) {
+                    Log.d(TAG, "Found existing ACCEPT decision, trusting host")
+                    // User already approved - trust the host
+                    runBlocking {
+                        trustedHostRepository.trustHost(
+                            host = serverKeyInfo.host,
+                            port = serverKeyInfo.port,
+                            fingerprint = serverKeyInfo.fingerprint,
+                            keyType = serverKeyInfo.keyType,
+                            trustLevel = TrustLevel.TRUSTED
+                        )
                     }
-                    existingDecision
+                    // Clear the pending verification since we've handled it
+                    pendingVerifications.remove(pendingKey)
+                    VerificationDecision.ACCEPT
                 } else {
-                    // No decision yet - reject and let ViewModel handle it
-                    Log.d(TAG, "No existing decision, returning REJECT to trigger dialog")
-                    VerificationDecision.REJECT
+                    // No decision yet - ACCEPT to allow connection to proceed
+                    // The pending verification will be checked after connect() returns
+                    Log.d(TAG, "No existing decision, accepting temporarily for dialog")
+                    VerificationDecision.ACCEPT
                 }
             }
             is HostVerificationResult.FingerprintChanged -> {
                 Log.w(TAG, "Host fingerprint changed! Storing for user confirmation")
                 val pendingKey = "${serverKeyInfo.host}:${serverKeyInfo.port}"
                 pendingVerifications[pendingKey] = verificationResult
+                Log.d(TAG, "Stored pending fingerprint change verification with key: $pendingKey")
 
                 // Check if we already have a decision
-                val existingDecision = verificationResults.remove(pendingKey)
-                if (existingDecision != null) {
-                    Log.d(TAG, "Found existing verification decision: $existingDecision")
-                    if (existingDecision == VerificationDecision.ACCEPT) {
-                        // User accepted the change - update the fingerprint
-                        runBlocking {
-                            trustedHostRepository.updateFingerprint(
-                                host = serverKeyInfo.host,
-                                port = serverKeyInfo.port,
-                                newFingerprint = serverKeyInfo.fingerprint,
-                                keyType = serverKeyInfo.keyType
-                            )
-                        }
+                val existingDecision = verificationResults[pendingKey]
+                if (existingDecision == VerificationDecision.ACCEPT) {
+                    Log.d(TAG, "Found existing ACCEPT decision for fingerprint change")
+                    // User accepted the change - update the fingerprint
+                    runBlocking {
+                        trustedHostRepository.updateFingerprint(
+                            host = serverKeyInfo.host,
+                            port = serverKeyInfo.port,
+                            newFingerprint = serverKeyInfo.fingerprint,
+                            keyType = serverKeyInfo.keyType
+                        )
                     }
-                    existingDecision
+                    // Clear the pending verification since we've handled it
+                    pendingVerifications.remove(pendingKey)
+                    VerificationDecision.ACCEPT
                 } else {
-                    // No decision yet - reject and let ViewModel handle it
-                    VerificationDecision.REJECT
+                    // No decision yet - ACCEPT to allow connection to proceed
+                    // The pending verification will be checked after connect() returns
+                    Log.d(TAG, "No existing decision for fingerprint change, accepting temporarily for dialog")
+                    VerificationDecision.ACCEPT
                 }
             }
         }
@@ -200,8 +204,12 @@ class SshProtocolAdapter @Inject constructor(
             kotlinx.coroutines.delay(200)
 
             // Check if there's a pending verification (new host or fingerprint changed)
+            // But skip if we already have a positive decision (user already approved)
+            val key = "${connection.host}:${connection.port}"
+            val hasPositiveDecision = verificationResults[key] == VerificationDecision.ACCEPT
             val pendingVerification = getPendingVerification(connection.host, connection.port)
-            if (pendingVerification != null) {
+
+            if (pendingVerification != null && !hasPositiveDecision) {
                 Log.d(TAG, "Pending host verification detected after connect: $pendingVerification")
                 // Close the session since we need user confirmation
                 clientSession.close(false)
@@ -210,6 +218,10 @@ class SshProtocolAdapter @Inject constructor(
                     pendingVerification
                 )
             }
+
+            // Clear the verification result now that we've used it
+            verificationResults.remove(key)
+            pendingVerifications.remove(key)
 
             // If we got here, the server key was accepted
             Log.d(TAG, "No pending verification, host is trusted")
