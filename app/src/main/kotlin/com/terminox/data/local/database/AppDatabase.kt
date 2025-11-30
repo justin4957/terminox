@@ -11,7 +11,7 @@ import com.terminox.data.local.database.entity.TrustedHostEntity
 
 @Database(
     entities = [ConnectionEntity::class, SshKeyEntity::class, TrustedHostEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

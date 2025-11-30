@@ -14,6 +14,8 @@ data class ConnectionEntity(
     val protocol: String,
     val authMethod: String,
     val keyId: String?,
+    val securityLevel: String = "HOME_NETWORK",
+    val customSecuritySettingsJson: String? = null,
     val createdAt: Long,
     val lastConnectedAt: Long?
 )

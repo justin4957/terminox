@@ -13,9 +13,25 @@ data class Connection(
     val protocol: ProtocolType = ProtocolType.SSH,
     val authMethod: AuthMethod,
     val keyId: String? = null,
+    val securityLevel: SecurityLevel = SecurityLevel.HOME_NETWORK,
+    val customSecuritySettings: SecuritySettings? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val lastConnectedAt: Long? = null
-)
+) {
+    /**
+     * Get the effective security settings for this connection.
+     * Uses custom settings if defined, otherwise uses the security level defaults.
+     */
+    val effectiveSecuritySettings: SecuritySettings
+        get() = customSecuritySettings ?: securityLevel.getDefaultSettings()
+
+    /**
+     * Validate the connection against its security settings.
+     */
+    fun validateSecurity(hasHostFingerprint: Boolean = false): SecurityValidationResult {
+        return validateConnectionSecurity(authMethod, effectiveSecuritySettings, hasHostFingerprint)
+    }
+}
 
 @Serializable
 enum class ProtocolType {
