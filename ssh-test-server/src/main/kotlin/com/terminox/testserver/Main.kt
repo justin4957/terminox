@@ -6,6 +6,7 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
+import com.terminox.testserver.discovery.MdnsAdvertiser
 import com.terminox.testserver.pairing.PairingManager
 import com.terminox.testserver.security.AuditLog
 import com.terminox.testserver.security.ConnectionGuard
@@ -92,8 +93,15 @@ class SshTestServerCli : CliktCommand(
 
     private val pairHost by option("--pair-host", help = "Custom hostname/IP for pairing QR code")
 
+    // mDNS/Bonjour discovery options
+    private val advertise by option("--advertise", help = "Advertise server via mDNS with this name")
+
+    private val noAdvertise by option("--no-advertise", help = "Disable mDNS advertising")
+        .flag(default = false)
+
     // Store pairing manager for interactive commands
     private var pairingManager: PairingManager? = null
+    private var mdnsAdvertiser: MdnsAdvertiser? = null
 
     override fun run() {
         // Handle key generation mode
@@ -162,6 +170,11 @@ class SshTestServerCli : CliktCommand(
         println()
         printSecurityInfo(server)
         println()
+
+        // Start mDNS advertising if enabled
+        if (!noAdvertise) {
+            startMdnsAdvertising(serverFingerprint, !disablePassword)
+        }
 
         // If --pair mode, immediately start pairing session
         if (pairMode) {
@@ -265,6 +278,7 @@ class SshTestServerCli : CliktCommand(
 
         Runtime.getRuntime().addShutdownHook(Thread {
             println("\nShutting down...")
+            mdnsAdvertiser?.stopAdvertising()
             server.stop()
             shutdownLatch.countDown()
         })
@@ -272,6 +286,7 @@ class SshTestServerCli : CliktCommand(
         try {
             shutdownLatch.await()
         } catch (e: InterruptedException) {
+            mdnsAdvertiser?.stopAdvertising()
             server.stop()
         }
     }
@@ -303,6 +318,7 @@ class SshTestServerCli : CliktCommand(
                 "help", "?" -> printHelp()
                 "quit", "exit", "q" -> {
                     println("Shutting down server...")
+                    mdnsAdvertiser?.stopAdvertising()
                     server.stop()
                     break
                 }
@@ -374,6 +390,17 @@ class SshTestServerCli : CliktCommand(
                     printConnectionInfo(server)
                     println()
                     printSecurityInfo(server)
+                    println()
+                    printMdnsStatus()
+                }
+                "mdns" -> printMdnsStatus()
+                "mdns-start" -> {
+                    val serverFingerprint = calculateServerFingerprint(File(server.getConfig().hostKeyPath))
+                    startMdnsAdvertising(serverFingerprint, !disablePassword)
+                }
+                "mdns-stop" -> {
+                    mdnsAdvertiser?.stopAdvertising()
+                    println("mDNS advertising stopped")
                 }
                 "clear" -> {
                     print("\u001B[2J\u001B[H")
@@ -404,6 +431,11 @@ class SshTestServerCli : CliktCommand(
             |    pair [timeout]  Start QR code pairing session (default: 5 min)
             |    pairlist        List active pairing sessions
             |    paircancel <id> Cancel a pairing session
+            |
+            |  mDNS Discovery:
+            |    mdns            Show mDNS advertising status
+            |    mdns-start      Start mDNS advertising
+            |    mdns-stop       Stop mDNS advertising
             |
             |  Security:
             |    security        Show security status
@@ -631,6 +663,72 @@ class SshTestServerCli : CliktCommand(
             println("Cancelled pairing session: ${matchingSession.sessionId.take(8)}")
         } else {
             println("No matching pairing session found for: $sessionId")
+        }
+    }
+
+    /**
+     * Start mDNS advertising for server discovery.
+     */
+    private fun startMdnsAdvertising(serverFingerprint: String, allowPassword: Boolean) {
+        // Determine service name
+        val serviceName = advertise ?: run {
+            val hostname = try {
+                java.net.InetAddress.getLocalHost().hostName
+            } catch (e: Exception) {
+                "terminox-ssh"
+            }
+            "$hostname-ssh"
+        }
+
+        println("╔══════════════════════════════════════════════════════════════╗")
+        println("║                    mDNS DISCOVERY                            ║")
+        println("╚══════════════════════════════════════════════════════════════╝")
+        println()
+
+        val advertiser = MdnsAdvertiser(
+            serviceName = serviceName,
+            port = port,
+            serverFingerprint = serverFingerprint,
+            requireKeyAuth = !allowPassword,
+            serverVersion = "3.0.0"
+        )
+
+        if (advertiser.startAdvertising()) {
+            mdnsAdvertiser = advertiser
+            println("  ✓ mDNS advertising started")
+            println("  Service name: $serviceName")
+            println("  Service type: ${MdnsAdvertiser.SERVICE_TYPE}")
+            val addresses = advertiser.getAdvertisedAddresses()
+            if (addresses.isNotEmpty()) {
+                println("  Advertised on: ${addresses.joinToString(", ")}")
+            }
+            println()
+            println("  Terminox app can now discover this server automatically!")
+            println()
+        } else {
+            println("  ⚠ mDNS advertising failed to start")
+            println("  Server will still work, but won't be discoverable")
+            println()
+        }
+
+        logger.info("mDNS advertising status: ${advertiser.isAdvertising()}")
+    }
+
+    /**
+     * Print mDNS advertising status.
+     */
+    private fun printMdnsStatus() {
+        val advertiser = mdnsAdvertiser
+        if (advertiser == null || !advertiser.isAdvertising()) {
+            println("mDNS Discovery: NOT ADVERTISING")
+            println("  Use 'mdns-start' to enable discovery")
+        } else {
+            println("mDNS Discovery: ADVERTISING")
+            println("  Service type: ${MdnsAdvertiser.SERVICE_TYPE}")
+            val addresses = advertiser.getAdvertisedAddresses()
+            if (addresses.isNotEmpty()) {
+                println("  Advertised on: ${addresses.joinToString(", ")}")
+            }
         }
     }
 

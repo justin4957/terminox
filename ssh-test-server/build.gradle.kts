@@ -35,6 +35,9 @@ dependencies {
     // JSON serialization for pairing payload
     implementation("com.google.code.gson:gson:2.10.1")
 
+    // mDNS/Bonjour for service discovery
+    implementation("org.jmdns:jmdns:3.5.9")
+
     // Testing
     testImplementation(kotlin("test"))
 }

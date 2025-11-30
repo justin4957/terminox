@@ -8,6 +8,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.terminox.presentation.connections.ConnectionsScreen
+import com.terminox.presentation.discovery.ServerDiscoveryScreen
 import com.terminox.presentation.keys.KeyManagementScreen
 import com.terminox.presentation.pairing.QrPairingScreen
 import com.terminox.presentation.settings.SettingsScreen
@@ -21,6 +22,7 @@ sealed class Screen(val route: String) {
     data object Keys : Screen("keys")
     data object Settings : Screen("settings")
     data object QrPairing : Screen("qr-pairing")
+    data object Discovery : Screen("discovery")
 }
 
 @Composable
@@ -44,6 +46,9 @@ fun TerminoxNavHost(
                 },
                 onNavigateToQrPairing = {
                     navController.navigate(Screen.QrPairing.route)
+                },
+                onNavigateToDiscovery = {
+                    navController.navigate(Screen.Discovery.route)
                 }
             )
         }
@@ -79,6 +84,16 @@ fun TerminoxNavHost(
                 onPairingComplete = { connectionId ->
                     navController.popBackStack()
                     navController.navigate(Screen.Terminal.createRoute(connectionId))
+                }
+            )
+        }
+
+        composable(Screen.Discovery.route) {
+            ServerDiscoveryScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onConnect = { connection ->
+                    navController.popBackStack()
+                    navController.navigate(Screen.Terminal.createRoute(connection.id))
                 }
             )
         }
