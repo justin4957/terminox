@@ -203,12 +203,22 @@ private fun DrawScope.drawTerminalLine(
     visibleColumns: Int,
     theme: TerminalTheme
 ) {
+    // Skip drawing if canvas has invalid dimensions
+    if (size.width <= 0 || size.height <= 0) return
+
     val y = rowIndex * cellDimensions.height
+
+    // Skip if row is outside visible area
+    if (y >= size.height) return
 
     line.cells.forEachIndexed { colIndex, cell ->
         if (colIndex >= visibleColumns) return@forEachIndexed
 
         val x = colIndex * cellDimensions.width
+
+        // Skip if cell is outside visible area
+        if (x >= size.width) return@forEachIndexed
+
         val style = cell.style
 
         // Draw background if not default
@@ -242,12 +252,16 @@ private fun DrawScope.drawTerminalLine(
                 fontStyle = if (style.attributes.italic) FontStyle.Italic else FontStyle.Normal
             )
 
-            drawText(
-                textMeasurer = textMeasurer,
-                text = cell.character.toString(),
-                style = textStyle,
-                topLeft = Offset(x, y)
-            )
+            // Only draw if there's enough space for the text
+            val availableWidth = size.width - x
+            if (availableWidth > 0) {
+                drawText(
+                    textMeasurer = textMeasurer,
+                    text = cell.character.toString(),
+                    style = textStyle,
+                    topLeft = Offset(x, y)
+                )
+            }
 
             // Draw underline
             if (style.attributes.underline) {

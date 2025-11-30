@@ -1,9 +1,15 @@
 package com.terminox.presentation.connections
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -12,6 +18,7 @@ import com.terminox.R
 import com.terminox.domain.model.AuthMethod
 import com.terminox.domain.model.Connection
 import com.terminox.domain.model.ProtocolType
+import com.terminox.domain.model.SecurityLevel
 import java.util.UUID
 
 /**
@@ -36,6 +43,24 @@ fun ConnectionDialog(
     var port by remember { mutableStateOf(existingConnection?.port?.toString() ?: "22") }
     var username by remember { mutableStateOf(existingConnection?.username ?: "") }
     var selectedProtocol by remember { mutableStateOf(existingConnection?.protocol ?: ProtocolType.SSH) }
+    var selectedSecurityLevel by remember {
+        mutableStateOf(existingConnection?.securityLevel ?: SecurityLevel.HOME_NETWORK)
+    }
+    var showSecurityOptions by remember { mutableStateOf(false) }
+
+    // Calculate recommended security level based on host
+    val recommendedLevel by remember(host) {
+        derivedStateOf {
+            if (host.isNotBlank()) SecurityLevel.recommendedForHost(host) else null
+        }
+    }
+
+    // Auto-update security level when host changes (only for new connections)
+    LaunchedEffect(recommendedLevel) {
+        if (!isEditMode && recommendedLevel != null) {
+            selectedSecurityLevel = recommendedLevel!!
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -47,7 +72,9 @@ fun ConnectionDialog(
         },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedTextField(
@@ -96,6 +123,42 @@ fun ConnectionDialog(
                         )
                     }
                 }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                // Security level section header with expand/collapse
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "Security Level",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            text = selectedSecurityLevel.displayName(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = { showSecurityOptions = !showSecurityOptions }) {
+                        Icon(
+                            imageVector = if (showSecurityOptions) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (showSecurityOptions) "Collapse" else "Expand"
+                        )
+                    }
+                }
+
+                // Security level selector (expanded)
+                if (showSecurityOptions) {
+                    SecurityLevelSelector(
+                        selectedLevel = selectedSecurityLevel,
+                        onLevelSelected = { selectedSecurityLevel = it },
+                        recommendedLevel = recommendedLevel
+                    )
+                }
             }
         },
         confirmButton = {
@@ -108,7 +171,8 @@ fun ConnectionDialog(
                             host = host,
                             port = port.toIntOrNull() ?: 22,
                             username = username,
-                            protocol = selectedProtocol
+                            protocol = selectedProtocol,
+                            securityLevel = selectedSecurityLevel
                         )
                         onUpdate(updatedConnection)
                     } else {
@@ -120,7 +184,8 @@ fun ConnectionDialog(
                             port = port.toIntOrNull() ?: 22,
                             username = username,
                             protocol = selectedProtocol,
-                            authMethod = AuthMethod.Password
+                            authMethod = AuthMethod.Password,
+                            securityLevel = selectedSecurityLevel
                         )
                         onSave(newConnection)
                     }

@@ -21,6 +21,11 @@ interface TrustedHostRepository {
     suspend fun getTrustedHost(host: String, port: Int): TrustedHost?
 
     /**
+     * Checks if a host is trusted (has a stored fingerprint).
+     */
+    suspend fun isHostTrusted(host: String, port: Int): Boolean
+
+    /**
      * Verifies a server's fingerprint against stored trust data.
      */
     suspend fun verifyHost(

@@ -5,6 +5,8 @@ import com.terminox.domain.model.AuthMethod
 import com.terminox.domain.model.Connection
 import com.terminox.domain.model.HostVerificationResult
 import com.terminox.domain.model.ProtocolType
+import com.terminox.domain.model.SecuritySettings
+import com.terminox.domain.model.SecurityValidationResult
 import com.terminox.domain.model.SessionState
 import com.terminox.domain.model.TerminalSession
 import com.terminox.domain.model.TerminalSize
@@ -189,14 +191,47 @@ class SshProtocolAdapter @Inject constructor(
     override suspend fun connect(connection: Connection): Result<TerminalSession> = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Connecting to ${connection.host}:${connection.port} as ${connection.username}")
+            Log.d(TAG, "Security level: ${connection.securityLevel.displayName()}")
+
+            // Validate security settings before connecting
+            val securitySettings = connection.effectiveSecuritySettings
+            val hasHostFingerprint = runBlocking {
+                trustedHostRepository.isHostTrusted(connection.host, connection.port)
+            }
+
+            val securityValidation = connection.validateSecurity(hasHostFingerprint)
+            when (securityValidation) {
+                is SecurityValidationResult.Error -> {
+                    Log.e(TAG, "Security validation failed: ${securityValidation.message}")
+                    return@withContext Result.failure(
+                        SecurityValidationException(securityValidation.message)
+                    )
+                }
+                is SecurityValidationResult.Warning -> {
+                    Log.w(TAG, "Security warning: ${securityValidation.message}")
+                    // Warnings are logged but don't block the connection
+                    // The UI layer can choose to show these to the user
+                }
+                is SecurityValidationResult.Valid -> {
+                    Log.d(TAG, "Security validation passed")
+                }
+            }
+
+            // Get connection timeout from security settings
+            val connectionTimeout = if (securitySettings.connectionTimeoutSeconds > 0) {
+                securitySettings.connectionTimeoutSeconds.toLong()
+            } else {
+                CONNECTION_TIMEOUT_SECONDS
+            }
+
             Log.d(TAG, "SSH client server key verifier: ${sshClient.serverKeyVerifier?.javaClass?.simpleName}")
             val connectFuture = sshClient.connect(
                 connection.username,
                 connection.host,
                 connection.port
             )
-            Log.d(TAG, "Connect future created, waiting for verification...")
-            val clientSession = connectFuture.verify(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS).session
+            Log.d(TAG, "Connect future created, waiting for verification (timeout: ${connectionTimeout}s)...")
+            val clientSession = connectFuture.verify(connectionTimeout, TimeUnit.SECONDS).session
             Log.d(TAG, "Session established: ${clientSession.sessionId}")
 
             // Wait a moment for async key verification to complete
@@ -475,3 +510,8 @@ class HostVerificationException(
     message: String,
     val verificationResult: HostVerificationResult
 ) : Exception(message)
+
+/**
+ * Exception thrown when security validation fails for a connection.
+ */
+class SecurityValidationException(message: String) : Exception(message)

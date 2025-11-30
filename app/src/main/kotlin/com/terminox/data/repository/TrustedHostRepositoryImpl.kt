@@ -27,6 +27,11 @@ class TrustedHostRepositoryImpl @Inject constructor(
         return trustedHostDao.getTrustedHost(hostKey)?.toDomainModel()
     }
 
+    override suspend fun isHostTrusted(host: String, port: Int): Boolean {
+        val hostKey = TrustedHost.createHostKey(host, port)
+        return trustedHostDao.getTrustedHost(hostKey) != null
+    }
+
     override suspend fun verifyHost(
         host: String,
         port: Int,

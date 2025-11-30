@@ -15,6 +15,7 @@ import com.terminox.domain.model.TerminalSize
 import com.terminox.domain.repository.ConnectionRepository
 import com.terminox.domain.repository.SshKeyRepository
 import com.terminox.protocol.ssh.HostVerificationException
+import com.terminox.protocol.ssh.SecurityValidationException
 import com.terminox.protocol.ProtocolFactory
 import com.terminox.protocol.TerminalOutput
 import com.terminox.protocol.TerminalProtocol
@@ -185,23 +186,34 @@ class TerminalViewModel @Inject constructor(
                     }
                 },
                 onFailure = { error ->
-                    // Check if this is a host verification issue
-                    if (error is HostVerificationException) {
-                        Log.d(TAG, "Host verification required: ${error.verificationResult}")
-                        _uiState.update {
-                            it.copy(
-                                sessionState = SessionState.DISCONNECTED,
-                                hostVerification = error.verificationResult,
-                                pendingConnectionId = connectionId,
-                                error = null
-                            )
+                    when (error) {
+                        is HostVerificationException -> {
+                            Log.d(TAG, "Host verification required: ${error.verificationResult}")
+                            _uiState.update {
+                                it.copy(
+                                    sessionState = SessionState.DISCONNECTED,
+                                    hostVerification = error.verificationResult,
+                                    pendingConnectionId = connectionId,
+                                    error = null
+                                )
+                            }
                         }
-                    } else {
-                        _uiState.update {
-                            it.copy(
-                                sessionState = SessionState.ERROR,
-                                error = error.message ?: "Connection failed"
-                            )
+                        is SecurityValidationException -> {
+                            Log.e(TAG, "Security validation failed: ${error.message}")
+                            _uiState.update {
+                                it.copy(
+                                    sessionState = SessionState.ERROR,
+                                    error = "Security Policy: ${error.message}"
+                                )
+                            }
+                        }
+                        else -> {
+                            _uiState.update {
+                                it.copy(
+                                    sessionState = SessionState.ERROR,
+                                    error = error.message ?: "Connection failed"
+                                )
+                            }
                         }
                     }
                 }
