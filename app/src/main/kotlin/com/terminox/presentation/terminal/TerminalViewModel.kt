@@ -10,6 +10,7 @@ import com.terminox.domain.model.KeyType
 import com.terminox.domain.model.ProtocolType
 import com.terminox.domain.model.SessionState
 import com.terminox.domain.model.TerminalSession
+import com.terminox.domain.model.TerminalSettings
 import com.terminox.domain.model.TerminalSize
 import com.terminox.domain.repository.ConnectionRepository
 import com.terminox.domain.repository.SshKeyRepository
@@ -75,7 +76,10 @@ data class TerminalUiState(
     val moshRtt: Int = -1,
     // Host verification (TOFU)
     val hostVerification: HostVerificationResult? = null,
-    val pendingConnectionId: String? = null
+    val pendingConnectionId: String? = null,
+    // Terminal settings
+    val settings: TerminalSettings = TerminalSettings.DEFAULT,
+    val showSettingsSheet: Boolean = false
 )
 
 @HiltViewModel
@@ -559,8 +563,43 @@ class TerminalViewModel @Inject constructor(
             SpecialKey.CTRL_D -> "\u0004"
             SpecialKey.CTRL_Z -> "\u001a"
             SpecialKey.CTRL_L -> "\u000c"
+            // Function keys (VT100/xterm sequences)
+            SpecialKey.F1 -> "\u001bOP"
+            SpecialKey.F2 -> "\u001bOQ"
+            SpecialKey.F3 -> "\u001bOR"
+            SpecialKey.F4 -> "\u001bOS"
+            SpecialKey.F5 -> "\u001b[15~"
+            SpecialKey.F6 -> "\u001b[17~"
+            SpecialKey.F7 -> "\u001b[18~"
+            SpecialKey.F8 -> "\u001b[19~"
+            SpecialKey.F9 -> "\u001b[20~"
+            SpecialKey.F10 -> "\u001b[21~"
+            SpecialKey.F11 -> "\u001b[23~"
+            SpecialKey.F12 -> "\u001b[24~"
         }
         sendInput(sequence)
+    }
+
+    /**
+     * Sends a function key (F1-F12).
+     */
+    fun sendFunctionKey(number: Int) {
+        val key = when (number) {
+            1 -> SpecialKey.F1
+            2 -> SpecialKey.F2
+            3 -> SpecialKey.F3
+            4 -> SpecialKey.F4
+            5 -> SpecialKey.F5
+            6 -> SpecialKey.F6
+            7 -> SpecialKey.F7
+            8 -> SpecialKey.F8
+            9 -> SpecialKey.F9
+            10 -> SpecialKey.F10
+            11 -> SpecialKey.F11
+            12 -> SpecialKey.F12
+            else -> return
+        }
+        sendSpecialKey(key)
     }
 
     /**
@@ -725,6 +764,27 @@ class TerminalViewModel @Inject constructor(
     }
 
     /**
+     * Updates terminal settings.
+     */
+    fun updateSettings(settings: TerminalSettings) {
+        _uiState.update { it.copy(settings = settings) }
+    }
+
+    /**
+     * Shows the settings sheet.
+     */
+    fun showSettings() {
+        _uiState.update { it.copy(showSettingsSheet = true) }
+    }
+
+    /**
+     * Hides the settings sheet.
+     */
+    fun hideSettings() {
+        _uiState.update { it.copy(showSettingsSheet = false) }
+    }
+
+    /**
      * Notifies the Mosh adapter of network changes for roaming support.
      */
     fun onNetworkChanged() {
@@ -772,5 +832,7 @@ enum class SpecialKey {
     CTRL_C,
     CTRL_D,
     CTRL_Z,
-    CTRL_L
+    CTRL_L,
+    // Function keys
+    F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12
 }

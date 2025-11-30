@@ -1,6 +1,7 @@
 package com.terminox.protocol.terminal
 
 import androidx.compose.ui.graphics.Color
+import com.terminox.domain.model.TerminalTheme
 
 /**
  * Represents terminal colors including standard ANSI colors,
@@ -17,6 +18,19 @@ sealed class TerminalColor {
             is Default -> if (isDarkTheme) Color(0xFFE4E4E4) else Color(0xFF1A1C19)
             is Ansi -> ansiToColor(code, isDarkTheme)
             is Indexed -> indexedToColor(index)
+            is Rgb -> Color(red, green, blue)
+        }
+    }
+
+    /**
+     * Convert to Compose Color using the given theme's color palette.
+     * This allows terminal text to use the theme's ANSI colors.
+     */
+    fun toComposeColor(theme: TerminalTheme): Color {
+        return when (this) {
+            is Default -> theme.foreground
+            is Ansi -> theme.getAnsiColor(code)
+            is Indexed -> indexedToColor(index, theme)
             is Rgb -> Color(red, green, blue)
         }
     }
@@ -70,6 +84,28 @@ sealed class TerminalColor {
                 }
                 else -> {
                     // Grayscale (24 shades)
+                    val gray = (index - 232) * 10 + 8
+                    Color(gray, gray, gray)
+                }
+            }
+        }
+
+        private fun indexedToColor(index: Int, theme: TerminalTheme): Color {
+            return when {
+                index < 16 -> {
+                    // Use theme's ANSI colors for 0-15
+                    theme.getAnsiColor(index)
+                }
+                index < 232 -> {
+                    // 216 color cube (6x6x6) - same as before
+                    val i = index - 16
+                    val r = (i / 36) * 51
+                    val g = ((i / 6) % 6) * 51
+                    val b = (i % 6) * 51
+                    Color(r, g, b)
+                }
+                else -> {
+                    // Grayscale (24 shades) - same as before
                     val gray = (index - 232) * 10 + 8
                     Color(gray, gray, gray)
                 }
