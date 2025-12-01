@@ -1,9 +1,11 @@
 package com.terminox.di
 
 import com.terminox.data.repository.ConnectionRepositoryImpl
+import com.terminox.data.repository.KeySyncRepositoryImpl
 import com.terminox.data.repository.SshKeyRepositoryImpl
 import com.terminox.data.repository.TrustedHostRepositoryImpl
 import com.terminox.domain.repository.ConnectionRepository
+import com.terminox.domain.repository.KeySyncRepository
 import com.terminox.domain.repository.SshKeyRepository
 import com.terminox.domain.repository.TrustedHostRepository
 import dagger.Binds
@@ -33,4 +35,10 @@ abstract class RepositoryModule {
     abstract fun bindTrustedHostRepository(
         impl: TrustedHostRepositoryImpl
     ): TrustedHostRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindKeySyncRepository(
+        impl: KeySyncRepositoryImpl
+    ): KeySyncRepository
 }

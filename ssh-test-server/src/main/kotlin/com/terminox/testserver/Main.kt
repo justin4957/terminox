@@ -7,6 +7,11 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
 import com.terminox.testserver.discovery.MdnsAdvertiser
+import com.terminox.testserver.keysync.KeyRegistry
+import com.terminox.testserver.keysync.KeySyncProtocol
+import com.terminox.testserver.keysync.KeyEvent
+import com.terminox.testserver.keysync.KeyEventListener
+import com.terminox.testserver.keysync.KeyStatus
 import com.terminox.testserver.pairing.PairingManager
 import com.terminox.testserver.security.AuditLog
 import com.terminox.testserver.security.ConnectionGuard
@@ -16,6 +21,7 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.security.MessageDigest
+import java.security.PublicKey
 import java.util.*
 import java.util.concurrent.CountDownLatch
 
@@ -99,9 +105,11 @@ class SshTestServerCli : CliktCommand(
     private val noAdvertise by option("--no-advertise", help = "Disable mDNS advertising")
         .flag(default = false)
 
-    // Store pairing manager for interactive commands
+    // Store managers for interactive commands
     private var pairingManager: PairingManager? = null
     private var mdnsAdvertiser: MdnsAdvertiser? = null
+    private var keyRegistry: KeyRegistry? = null
+    private var keySyncProtocol: KeySyncProtocol? = null
 
     override fun run() {
         // Handle key generation mode
@@ -153,7 +161,23 @@ class SshTestServerCli : CliktCommand(
             return
         }
 
-        // Initialize pairing manager with callback to add keys to server's in-memory store
+        // Initialize key registry for key sync functionality
+        val keysDir = File("keys")
+        keyRegistry = KeyRegistry(keysDir)
+        keySyncProtocol = KeySyncProtocol(keyRegistry!!)
+
+        // Add key event listener for logging
+        keyRegistry!!.addListener(object : KeyEventListener {
+            override fun onKeyEvent(event: KeyEvent) {
+                when (event) {
+                    is KeyEvent.Registered -> logger.info("Key registered: ${event.key.id} (${event.key.deviceName})")
+                    is KeyEvent.Revoked -> logger.info("Key revoked: ${event.key.id} (reason: ${event.reason})")
+                    is KeyEvent.Expired -> logger.info("Key expired: ${event.key.id}")
+                }
+            }
+        })
+
+        // Initialize pairing manager with callback to add keys to both server and registry
         val serverFingerprint = calculateServerFingerprint(File(config.hostKeyPath))
         pairingManager = PairingManager(
             keyManager = server.keyManager,
@@ -161,7 +185,10 @@ class SshTestServerCli : CliktCommand(
             serverFingerprint = serverFingerprint,
             onKeyAdded = { username, publicKey ->
                 server.addAuthorizedKey(username, publicKey)
-                logger.info("Added pairing key for user '$username' to server's authorized keys")
+                // Also register in key registry - convert PublicKey to OpenSSH format
+                val publicKeyOpenSsh = encodePublicKeyToOpenSsh(publicKey, username)
+                keyRegistry!!.registerKey(publicKeyOpenSsh, username)
+                logger.info("Added pairing key for user '$username' to server's authorized keys and registry")
             }
         )
 
@@ -402,6 +429,32 @@ class SshTestServerCli : CliktCommand(
                     mdnsAdvertiser?.stopAdvertising()
                     println("mDNS advertising stopped")
                 }
+                // Key management commands
+                "keys" -> listRegisteredKeys()
+                "revoke" -> {
+                    if (args.isNotEmpty()) {
+                        revokeKey(args[0], args.getOrNull(1) ?: "User requested")
+                    } else {
+                        println("Usage: revoke <keyid> [reason]")
+                    }
+                }
+                "expire" -> {
+                    if (args.size >= 2) {
+                        setKeyExpiry(args[0], args[1])
+                    } else {
+                        println("Usage: expire <keyid> <days>")
+                        println("Example: expire abc123 30")
+                    }
+                }
+                "rotate-keys" -> rotateAllKeys()
+                "key-info" -> {
+                    if (args.isNotEmpty()) {
+                        showKeyInfo(args[0])
+                    } else {
+                        println("Usage: key-info <keyid>")
+                    }
+                }
+                "key-stats" -> showKeyStatistics()
                 "clear" -> {
                     print("\u001B[2J\u001B[H")
                     System.out.flush()
@@ -436,6 +489,14 @@ class SshTestServerCli : CliktCommand(
             |    mdns            Show mDNS advertising status
             |    mdns-start      Start mDNS advertising
             |    mdns-stop       Stop mDNS advertising
+            |
+            |  Key Management (Sync):
+            |    keys            List all registered keys
+            |    key-info <id>   Show detailed key information
+            |    key-stats       Show key registry statistics
+            |    revoke <id>     Revoke a key
+            |    expire <id> <d> Set key expiry (days)
+            |    rotate-keys     Force all keys to re-register
             |
             |  Security:
             |    security        Show security status
@@ -730,6 +791,243 @@ class SshTestServerCli : CliktCommand(
                 println("  Advertised on: ${addresses.joinToString(", ")}")
             }
         }
+    }
+
+    // ==================== Key Management Functions ====================
+
+    /**
+     * List all registered keys.
+     */
+    private fun listRegisteredKeys() {
+        val registry = keyRegistry ?: run {
+            println("Error: Key registry not initialized")
+            return
+        }
+
+        val keys = registry.listKeys()
+        if (keys.isEmpty()) {
+            println("No registered keys")
+            println("  Use 'pair' to register a new device")
+            return
+        }
+
+        println("╔══════════════════════════════════════════════════════════════╗")
+        println("║                    REGISTERED KEYS                           ║")
+        println("╠══════════════════════════════════════════════════════════════╣")
+        println("║  ID        Device           Status     Last Used             ║")
+        println("╠══════════════════════════════════════════════════════════════╣")
+
+        keys.forEach { key ->
+            val statusIcon = when (key.status) {
+                KeyStatus.ACTIVE -> if (key.isValid()) "✓" else "⚠"
+                KeyStatus.EXPIRED -> "⏰"
+                KeyStatus.REVOKED -> "✗"
+            }
+            val lastUsed = key.lastUsed?.let { formatTimeAgo(it) } ?: "never"
+            val deviceDisplay = key.deviceName.take(14).padEnd(14)
+            val statusDisplay = key.status.name.padEnd(10)
+
+            println("║  ${key.id.take(8).padEnd(8)}  $deviceDisplay  $statusIcon $statusDisplay  $lastUsed".padEnd(65) + "║")
+        }
+
+        println("╚══════════════════════════════════════════════════════════════╝")
+        println()
+
+        val stats = registry.getStatistics()
+        println("Total: ${stats.total} | Active: ${stats.active} | Expired: ${stats.expired} | Revoked: ${stats.revoked}")
+    }
+
+    /**
+     * Show detailed information about a specific key.
+     */
+    private fun showKeyInfo(keyIdPrefix: String) {
+        val registry = keyRegistry ?: run {
+            println("Error: Key registry not initialized")
+            return
+        }
+
+        // Find key by prefix match
+        val key = registry.listKeys().find { it.id.startsWith(keyIdPrefix) }
+        if (key == null) {
+            println("Key not found: $keyIdPrefix")
+            return
+        }
+
+        println()
+        println("Key Details: ${key.id}")
+        println("─".repeat(60))
+        println("  Device:       ${key.deviceName}")
+        println("  Status:       ${key.status}")
+        println("  Valid:        ${if (key.isValid()) "Yes" else "No"}")
+        println("  Fingerprint:  ${key.fingerprint}")
+        println("  Registered:   ${formatTimestamp(key.registeredAt)}")
+        println("  Last used:    ${key.lastUsed?.let { formatTimestamp(it) } ?: "Never"}")
+        println("  Expires:      ${key.expiresAt?.let { formatTimestamp(it) } ?: "Never"}")
+        if (key.revokedAt != null) {
+            println("  Revoked:      ${formatTimestamp(key.revokedAt)}")
+            println("  Reason:       ${key.revocationReason ?: "Not specified"}")
+        }
+        println()
+        println("Public Key:")
+        println("  ${key.publicKey.take(60)}...")
+        println()
+    }
+
+    /**
+     * Revoke a key.
+     */
+    private fun revokeKey(keyIdPrefix: String, reason: String) {
+        val registry = keyRegistry ?: run {
+            println("Error: Key registry not initialized")
+            return
+        }
+
+        // Find key by prefix match
+        val key = registry.listKeys().find { it.id.startsWith(keyIdPrefix) }
+        if (key == null) {
+            println("Key not found: $keyIdPrefix")
+            return
+        }
+
+        if (registry.revokeKey(key.id, reason)) {
+            println("Key revoked: ${key.id}")
+            println("  Device: ${key.deviceName}")
+            println("  Reason: $reason")
+            println()
+            println("The device will need to re-pair to connect again.")
+        } else {
+            println("Failed to revoke key: ${key.id}")
+        }
+    }
+
+    /**
+     * Set key expiry.
+     */
+    private fun setKeyExpiry(keyIdPrefix: String, daysStr: String) {
+        val registry = keyRegistry ?: run {
+            println("Error: Key registry not initialized")
+            return
+        }
+
+        val days = daysStr.removeSuffix("d").toLongOrNull()
+        if (days == null || days <= 0) {
+            println("Invalid days value: $daysStr")
+            println("Example: expire abc123 30")
+            return
+        }
+
+        // Find key by prefix match
+        val key = registry.listKeys().find { it.id.startsWith(keyIdPrefix) }
+        if (key == null) {
+            println("Key not found: $keyIdPrefix")
+            return
+        }
+
+        if (registry.setKeyExpiry(key.id, days)) {
+            println("Key ${key.id} will expire in $days days")
+            println("  Device: ${key.deviceName}")
+        } else {
+            println("Failed to set expiry for key: ${key.id}")
+        }
+    }
+
+    /**
+     * Force rotation of all keys.
+     */
+    private fun rotateAllKeys() {
+        val registry = keyRegistry ?: run {
+            println("Error: Key registry not initialized")
+            return
+        }
+
+        println("⚠  WARNING: This will revoke ALL active keys!")
+        println("All devices will need to re-pair to connect.")
+        println()
+        print("Are you sure? (yes/no): ")
+        System.out.flush()
+
+        val confirmation = readLine()?.trim()?.lowercase()
+        if (confirmation != "yes") {
+            println("Rotation cancelled")
+            return
+        }
+
+        val count = registry.forceRotation()
+        println()
+        println("Rotation complete: $count keys revoked")
+        println("All devices must re-pair to connect.")
+    }
+
+    /**
+     * Show key registry statistics.
+     */
+    private fun showKeyStatistics() {
+        val registry = keyRegistry ?: run {
+            println("Error: Key registry not initialized")
+            return
+        }
+
+        // Expire any old keys first
+        val expiredKeys = registry.expireOldKeys()
+        if (expiredKeys.isNotEmpty()) {
+            println("Expired ${expiredKeys.size} key(s)")
+        }
+
+        val stats = registry.getStatistics()
+        println()
+        println("Key Registry Statistics")
+        println("─".repeat(40))
+        println("  Total keys:    ${stats.total}")
+        println("  Active:        ${stats.active}")
+        println("  Expired:       ${stats.expired}")
+        println("  Revoked:       ${stats.revoked}")
+        println()
+    }
+
+    /**
+     * Format a timestamp as a human-readable time ago string.
+     */
+    private fun formatTimeAgo(timestamp: Long): String {
+        val now = System.currentTimeMillis()
+        val diff = now - timestamp
+        val seconds = diff / 1000
+        val minutes = seconds / 60
+        val hours = minutes / 60
+        val days = hours / 24
+
+        return when {
+            days > 0 -> "${days}d ago"
+            hours > 0 -> "${hours}h ago"
+            minutes > 0 -> "${minutes}m ago"
+            else -> "just now"
+        }
+    }
+
+    /**
+     * Format a timestamp as a readable date/time.
+     */
+    private fun formatTimestamp(timestamp: Long): String {
+        return java.time.format.DateTimeFormatter
+            .ofPattern("yyyy-MM-dd HH:mm:ss")
+            .withZone(java.time.ZoneId.systemDefault())
+            .format(java.time.Instant.ofEpochMilli(timestamp))
+    }
+
+    /**
+     * Encode a PublicKey to OpenSSH format string.
+     */
+    private fun encodePublicKeyToOpenSsh(publicKey: PublicKey, comment: String): String {
+        // Determine key type
+        val keyType = when (publicKey.algorithm) {
+            "EdDSA", "Ed25519" -> "ssh-ed25519"
+            "RSA" -> "ssh-rsa"
+            "EC" -> "ecdsa-sha2-nistp256"
+            else -> "ssh-${publicKey.algorithm.lowercase()}"
+        }
+
+        // Encode the key data
+        val encoded = Base64.getEncoder().encodeToString(publicKey.encoded)
+        return "$keyType $encoded $comment"
     }
 
     companion object {
