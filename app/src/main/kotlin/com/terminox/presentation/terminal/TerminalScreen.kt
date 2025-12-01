@@ -384,12 +384,20 @@ fun TerminalScreen(
                                     value = inputText,
                                     onValueChange = { newValue ->
                                         val newText = newValue.text
-                                        if (newText.isNotEmpty()) {
-                                            // Send each new character
-                                            val oldText = inputText.text
-                                            if (newText.length > oldText.length) {
+                                        val oldText = inputText.text
+
+                                        when {
+                                            // Text was added - send the new characters
+                                            newText.length > oldText.length -> {
                                                 val addedText = newText.substring(oldText.length)
                                                 viewModel.sendInput(addedText)
+                                            }
+                                            // Text was deleted (backspace pressed) - send backspace
+                                            newText.length < oldText.length -> {
+                                                val deletedCount = oldText.length - newText.length
+                                                repeat(deletedCount) {
+                                                    viewModel.sendSpecialKey(SpecialKey.BACKSPACE)
+                                                }
                                             }
                                         }
                                         inputText = newValue
