@@ -12,6 +12,7 @@ import com.terminox.domain.model.SessionState
 import com.terminox.domain.model.TerminalSession
 import com.terminox.domain.model.TerminalSettings
 import com.terminox.domain.model.TerminalSize
+import com.terminox.domain.repository.AuditLogRepository
 import com.terminox.domain.repository.ConnectionRepository
 import com.terminox.domain.repository.SshKeyRepository
 import com.terminox.protocol.ssh.HostVerificationException
@@ -88,7 +89,8 @@ class TerminalViewModel @Inject constructor(
     private val connectionRepository: ConnectionRepository,
     private val protocolFactory: ProtocolFactory,
     private val sshKeyRepository: SshKeyRepository,
-    private val keyEncryptionManager: KeyEncryptionManager
+    private val keyEncryptionManager: KeyEncryptionManager,
+    private val auditLogRepository: AuditLogRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TerminalUiState())
@@ -100,7 +102,8 @@ class TerminalViewModel @Inject constructor(
         val connection: Connection,
         val emulator: TerminalEmulator,
         val outputJob: Job?,
-        val protocolType: ProtocolType = ProtocolType.SSH
+        val protocolType: ProtocolType = ProtocolType.SSH,
+        val connectionStartTime: Long = System.currentTimeMillis()
     )
 
     private val managedSessions = mutableMapOf<String, ManagedSession>()
@@ -137,6 +140,21 @@ class TerminalViewModel @Inject constructor(
                     protocolType = connection.protocol
                 )
             }
+
+            // Log connection attempt
+            val authMethodStr = when (connection.authMethod) {
+                is AuthMethod.Password -> "password"
+                is AuthMethod.PublicKey -> "publickey"
+                is AuthMethod.Agent -> "agent"
+            }
+            auditLogRepository.logConnectionAttempt(
+                connectionId = connection.id,
+                connectionName = connection.name,
+                host = connection.host,
+                port = connection.port,
+                username = connection.username,
+                authMethod = authMethodStr
+            )
 
             // Initialize connection based on protocol type
             val result = when (connection.protocol) {
@@ -186,6 +204,17 @@ class TerminalViewModel @Inject constructor(
                     }
                 },
                 onFailure = { error ->
+                    // Log connection failure
+                    auditLogRepository.logConnectionFailed(
+                        connectionId = connection.id,
+                        connectionName = connection.name,
+                        host = connection.host,
+                        port = connection.port,
+                        username = connection.username,
+                        authMethod = authMethodStr,
+                        errorMessage = error.message
+                    )
+
                     when (error) {
                         is HostVerificationException -> {
                             Log.d(TAG, "Host verification required: ${error.verificationResult}")
@@ -322,6 +351,17 @@ class TerminalViewModel @Inject constructor(
 
             result.fold(
                 onSuccess = {
+                    // Log successful connection
+                    auditLogRepository.logConnectionSuccess(
+                        connectionId = session.connection.id,
+                        connectionName = session.connection.name,
+                        host = session.connection.host,
+                        port = session.connection.port,
+                        username = session.connection.username,
+                        authMethod = "password",
+                        keyFingerprint = null
+                    )
+
                     _uiState.update {
                         it.copy(
                             sessionState = SessionState.CONNECTED,
@@ -340,6 +380,17 @@ class TerminalViewModel @Inject constructor(
                     updateSessionList()
                 },
                 onFailure = { error ->
+                    // Log authentication failure
+                    auditLogRepository.logConnectionFailed(
+                        connectionId = session.connection.id,
+                        connectionName = session.connection.name,
+                        host = session.connection.host,
+                        port = session.connection.port,
+                        username = session.connection.username,
+                        authMethod = "password",
+                        errorMessage = "Authentication failed: ${error.message}"
+                    )
+
                     _uiState.update {
                         it.copy(
                             sessionState = SessionState.ERROR,
@@ -416,6 +467,26 @@ class TerminalViewModel @Inject constructor(
                 result.fold(
                     onSuccess = {
                         Log.d(TAG, "Key authentication successful")
+
+                        // Log successful key authentication
+                        auditLogRepository.logConnectionSuccess(
+                            connectionId = connection.id,
+                            connectionName = connection.name,
+                            host = connection.host,
+                            port = connection.port,
+                            username = connection.username,
+                            authMethod = "publickey",
+                            keyFingerprint = sshKey.fingerprint
+                        )
+
+                        // Log key usage
+                        auditLogRepository.logKeyUsage(
+                            connectionId = connection.id,
+                            host = connection.host,
+                            port = connection.port,
+                            keyFingerprint = sshKey.fingerprint
+                        )
+
                         _uiState.update {
                             it.copy(
                                 sessionState = SessionState.CONNECTED,
@@ -435,6 +506,18 @@ class TerminalViewModel @Inject constructor(
                     },
                     onFailure = { error ->
                         Log.e(TAG, "Key authentication failed", error)
+
+                        // Log key auth failure
+                        auditLogRepository.logConnectionFailed(
+                            connectionId = connection.id,
+                            connectionName = connection.name,
+                            host = connection.host,
+                            port = connection.port,
+                            username = connection.username,
+                            authMethod = "publickey",
+                            errorMessage = "Key authentication failed: ${error.message}"
+                        )
+
                         _uiState.update {
                             it.copy(
                                 sessionState = SessionState.ERROR,
@@ -689,6 +772,17 @@ class TerminalViewModel @Inject constructor(
         val managed = managedSessions[sessionId] ?: return
 
         viewModelScope.launch {
+            // Log session end with duration
+            val durationMs = System.currentTimeMillis() - managed.connectionStartTime
+            auditLogRepository.logSessionEnd(
+                connectionId = managed.connection.id,
+                connectionName = managed.connection.name,
+                host = managed.connection.host,
+                port = managed.connection.port,
+                username = managed.connection.username,
+                durationMs = durationMs
+            )
+
             managed.outputJob?.cancel()
             val protocol: TerminalProtocol = when (managed.protocolType) {
                 ProtocolType.SSH -> sshAdapter
@@ -729,6 +823,17 @@ class TerminalViewModel @Inject constructor(
         val session = currentSession ?: return
 
         viewModelScope.launch {
+            // Log session end with duration
+            val durationMs = System.currentTimeMillis() - session.connectionStartTime
+            auditLogRepository.logSessionEnd(
+                connectionId = session.connection.id,
+                connectionName = session.connection.name,
+                host = session.connection.host,
+                port = session.connection.port,
+                username = session.connection.username,
+                durationMs = durationMs
+            )
+
             session.outputJob?.cancel()
             val protocol: TerminalProtocol = when (session.protocolType) {
                 ProtocolType.SSH -> sshAdapter

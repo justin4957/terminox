@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -30,6 +31,7 @@ fun ConnectionsScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToQrPairing: () -> Unit,
     onNavigateToDiscovery: () -> Unit,
+    onNavigateToHistory: () -> Unit = {},
     viewModel: ConnectionsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -47,6 +49,9 @@ fun ConnectionsScreen(
                     }
                     IconButton(onClick = onNavigateToQrPairing) {
                         Icon(Icons.Default.QrCodeScanner, contentDescription = "Scan QR Code")
+                    }
+                    IconButton(onClick = onNavigateToHistory) {
+                        Icon(Icons.Default.History, contentDescription = "Connection History")
                     }
                     IconButton(onClick = onNavigateToKeys) {
                         Icon(Icons.Default.Key, contentDescription = stringResource(R.string.nav_keys))
