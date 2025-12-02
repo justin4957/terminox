@@ -248,6 +248,23 @@ fun ExtraKeysToolbar(
                     onClick = { handleKeyWithModifiers(SpecialKey.PAGE_DOWN) },
                     onLongClick = { performHapticFeedback() }
                 )
+
+                VerticalDivider(
+                    modifier = Modifier.height(32.dp),
+                    color = Color(0xFF0F3460)
+                )
+
+                // Backspace/Delete
+                ExtraKeyButton(
+                    text = "BKSP",
+                    onClick = { handleKeyWithModifiers(SpecialKey.BACKSPACE) },
+                    onLongClick = { performHapticFeedback() }
+                )
+                ExtraKeyButton(
+                    text = "DEL",
+                    onClick = { handleKeyWithModifiers(SpecialKey.DELETE) },
+                    onLongClick = { performHapticFeedback() }
+                )
             }
 
             // Quick actions row (when CTRL is active)

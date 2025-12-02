@@ -5,6 +5,7 @@ import android.content.Context
 import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -84,6 +86,14 @@ fun TerminalScreen(
 
     // Clipboard helper
     val clipboardHelper = remember { TerminalClipboardHelper(context) }
+
+    // Enable edge-to-edge and proper keyboard handling
+    LaunchedEffect(Unit) {
+        val activity = context as? Activity ?: return@LaunchedEffect
+        val window = activity.window
+        // Enable edge-to-edge mode so content resizes with keyboard
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+    }
 
     // Immersive mode effect
     LaunchedEffect(settings.immersiveMode) {
@@ -273,6 +283,7 @@ fun TerminalScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
+                    .imePadding()
                     .background(theme.background)
             ) {
                 when (uiState.sessionState) {
@@ -384,12 +395,20 @@ fun TerminalScreen(
                                     value = inputText,
                                     onValueChange = { newValue ->
                                         val newText = newValue.text
-                                        if (newText.isNotEmpty()) {
-                                            // Send each new character
-                                            val oldText = inputText.text
-                                            if (newText.length > oldText.length) {
+                                        val oldText = inputText.text
+
+                                        when {
+                                            // Text was added - send the new characters
+                                            newText.length > oldText.length -> {
                                                 val addedText = newText.substring(oldText.length)
                                                 viewModel.sendInput(addedText)
+                                            }
+                                            // Text was deleted (backspace pressed) - send backspace
+                                            newText.length < oldText.length -> {
+                                                val deletedCount = oldText.length - newText.length
+                                                repeat(deletedCount) {
+                                                    viewModel.sendSpecialKey(SpecialKey.BACKSPACE)
+                                                }
                                             }
                                         }
                                         inputText = newValue

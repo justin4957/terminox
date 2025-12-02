@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -20,6 +21,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.terminox.R
 import com.terminox.domain.model.KeyType
 import com.terminox.domain.model.SshKey
+import com.terminox.domain.model.SyncStatus
+import com.terminox.domain.model.SyncedKey
 import com.terminox.security.BiometricStatus
 import java.text.SimpleDateFormat
 import java.util.*
@@ -44,6 +47,13 @@ fun KeyManagementScreen(
         uiState.error?.let { error ->
             snackbarHostState.showSnackbar(error)
             viewModel.clearError()
+        }
+    }
+
+    LaunchedEffect(uiState.syncMessage) {
+        uiState.syncMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            viewModel.clearSyncMessage()
         }
     }
 
@@ -86,12 +96,23 @@ fun KeyManagementScreen(
             } else {
                 KeysList(
                     keys = uiState.keys,
+                    syncedKeys = uiState.syncedKeys,
                     onKeyClick = { viewModel.showKeyDetail(it) },
                     onCopyClick = { key ->
                         clipboardManager.setText(AnnotatedString(viewModel.getPublicKeyForClipboard(key)))
                         viewModel.onCopiedToClipboard()
                     },
-                    onDeleteClick = { viewModel.showDeleteConfirmDialog(it) }
+                    onDeleteClick = { viewModel.showDeleteConfirmDialog(it) },
+                    onSyncClick = { viewModel.showSyncDialog(it) },
+                    onRefreshSyncClick = { viewModel.refreshSyncStatus(it) }
+                )
+            }
+
+            if (uiState.isSyncing) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(48.dp)
                 )
             }
         }
@@ -134,11 +155,23 @@ fun KeyManagementScreen(
     uiState.showKeyDetailDialog?.let { key ->
         KeyDetailDialog(
             key = key,
+            syncedKey = uiState.syncedKeys[key.id],
             onCopy = {
                 clipboardManager.setText(AnnotatedString(viewModel.getPublicKeyForClipboard(key)))
                 viewModel.onCopiedToClipboard()
             },
             onDismiss = { viewModel.hideKeyDetail() }
+        )
+    }
+
+    // Sync Key Dialog
+    uiState.showSyncDialog?.let { key ->
+        SyncKeyDialog(
+            key = key,
+            onSync = { serverHost, serverPort, expiresInDays ->
+                viewModel.syncKeyToServer(key, serverHost, serverPort, expiresInDays)
+            },
+            onDismiss = { viewModel.hideSyncDialog() }
         )
     }
 }
@@ -189,9 +222,12 @@ private fun EmptyKeysContent(
 @Composable
 private fun KeysList(
     keys: List<SshKey>,
+    syncedKeys: Map<String, SyncedKey>,
     onKeyClick: (SshKey) -> Unit,
     onCopyClick: (SshKey) -> Unit,
-    onDeleteClick: (SshKey) -> Unit
+    onDeleteClick: (SshKey) -> Unit,
+    onSyncClick: (SshKey) -> Unit,
+    onRefreshSyncClick: (SshKey) -> Unit
 ) {
     LazyColumn(
         contentPadding = PaddingValues(16.dp),
@@ -200,9 +236,12 @@ private fun KeysList(
         items(keys, key = { it.id }) { key ->
             KeyListItem(
                 key = key,
+                syncedKey = syncedKeys[key.id],
                 onClick = { onKeyClick(key) },
                 onCopyClick = { onCopyClick(key) },
-                onDeleteClick = { onDeleteClick(key) }
+                onDeleteClick = { onDeleteClick(key) },
+                onSyncClick = { onSyncClick(key) },
+                onRefreshSyncClick = { onRefreshSyncClick(key) }
             )
         }
     }
@@ -211,9 +250,12 @@ private fun KeysList(
 @Composable
 private fun KeyListItem(
     key: SshKey,
+    syncedKey: SyncedKey?,
     onClick: () -> Unit,
     onCopyClick: () -> Unit,
-    onDeleteClick: () -> Unit
+    onDeleteClick: () -> Unit,
+    onSyncClick: () -> Unit,
+    onRefreshSyncClick: () -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
 
@@ -235,10 +277,16 @@ private fun KeyListItem(
             )
             Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = key.name,
-                    style = MaterialTheme.typography.titleMedium
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = key.name,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    if (syncedKey != null) {
+                        Spacer(Modifier.width(8.dp))
+                        SyncStatusBadge(syncedKey.status)
+                    }
+                }
                 Text(
                     text = "${key.type.displayName} • ${dateFormat.format(Date(key.createdAt))}",
                     style = MaterialTheme.typography.bodySmall,
@@ -251,6 +299,24 @@ private fun KeyListItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                if (syncedKey != null) {
+                    Text(
+                        text = "Synced to ${syncedKey.serverHost}:${syncedKey.serverPort}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            if (syncedKey != null) {
+                IconButton(onClick = onRefreshSyncClick) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh sync status")
+                }
+            } else {
+                IconButton(onClick = onSyncClick) {
+                    Icon(Icons.Default.Sync, contentDescription = "Sync to server")
+                }
             }
             IconButton(onClick = onCopyClick) {
                 Icon(Icons.Default.ContentCopy, contentDescription = "Copy public key")
@@ -263,6 +329,49 @@ private fun KeyListItem(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun SyncStatusBadge(status: SyncStatus) {
+    val (backgroundColor, textColor, text) = when (status) {
+        SyncStatus.ACTIVE -> Triple(
+            Color(0xFF4CAF50).copy(alpha = 0.2f),
+            Color(0xFF4CAF50),
+            "Synced"
+        )
+        SyncStatus.PENDING_SYNC -> Triple(
+            Color(0xFFFFC107).copy(alpha = 0.2f),
+            Color(0xFFFFC107),
+            "Pending"
+        )
+        SyncStatus.REVOKED -> Triple(
+            Color(0xFFF44336).copy(alpha = 0.2f),
+            Color(0xFFF44336),
+            "Revoked"
+        )
+        SyncStatus.EXPIRED -> Triple(
+            Color(0xFFFF9800).copy(alpha = 0.2f),
+            Color(0xFFFF9800),
+            "Expired"
+        )
+        SyncStatus.SYNC_FAILED -> Triple(
+            Color(0xFFF44336).copy(alpha = 0.2f),
+            Color(0xFFF44336),
+            "Failed"
+        )
+    }
+
+    Surface(
+        color = backgroundColor,
+        shape = MaterialTheme.shapes.small
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = textColor,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
     }
 }
 
@@ -484,6 +593,7 @@ private fun DeleteKeyConfirmDialog(
 @Composable
 private fun KeyDetailDialog(
     key: SshKey,
+    syncedKey: SyncedKey?,
     onCopy: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -498,6 +608,17 @@ private fun KeyDetailDialog(
                 DetailRow("Created", dateFormat.format(Date(key.createdAt)))
                 DetailRow("Fingerprint", key.fingerprint)
                 DetailRow("Biometric", if (key.requiresBiometric) "Required" else "Not required")
+
+                if (syncedKey != null) {
+                    HorizontalDivider()
+                    Text("Sync Status", style = MaterialTheme.typography.labelMedium)
+                    DetailRow("Server", "${syncedKey.serverHost}:${syncedKey.serverPort}")
+                    DetailRow("Status", syncedKey.status.name)
+                    DetailRow("Last Synced", dateFormat.format(Date(syncedKey.lastSyncAt)))
+                    syncedKey.expiresAt?.let { expiresAt ->
+                        DetailRow("Expires", dateFormat.format(Date(expiresAt)))
+                    }
+                }
 
                 HorizontalDivider()
 
@@ -527,6 +648,75 @@ private fun KeyDetailDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text("Close")
+            }
+        }
+    )
+}
+
+@Composable
+private fun SyncKeyDialog(
+    key: SshKey,
+    onSync: (serverHost: String, serverPort: Int, expiresInDays: Long?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var serverHost by remember { mutableStateOf("") }
+    var serverPort by remember { mutableStateOf("4075") }
+    var expiresInDays by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sync Key to Server") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    text = "Register \"${key.name}\" with a server to enable key synchronization.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                OutlinedTextField(
+                    value = serverHost,
+                    onValueChange = { serverHost = it },
+                    label = { Text("Server Host") },
+                    placeholder = { Text("192.168.1.100") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = serverPort,
+                    onValueChange = { serverPort = it.filter { c -> c.isDigit() } },
+                    label = { Text("Server Port") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = expiresInDays,
+                    onValueChange = { expiresInDays = it.filter { c -> c.isDigit() } },
+                    label = { Text("Expires in (days)") },
+                    placeholder = { Text("Leave empty for no expiry") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val port = serverPort.toIntOrNull() ?: 4075
+                    val expires = expiresInDays.toLongOrNull()
+                    onSync(serverHost, port, expires)
+                },
+                enabled = serverHost.isNotBlank()
+            ) {
+                Icon(Icons.Default.Sync, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Sync")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
             }
         }
     )
