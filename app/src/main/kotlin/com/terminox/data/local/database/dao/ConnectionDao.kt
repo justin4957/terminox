@@ -27,4 +27,7 @@ interface ConnectionDao {
 
     @Query("UPDATE connections SET lastConnectedAt = :timestamp WHERE id = :id")
     suspend fun updateLastConnected(id: String, timestamp: Long)
+
+    @Query("SELECT * FROM connections ORDER BY lastConnectedAt DESC, createdAt DESC")
+    suspend fun getAllConnectionsList(): List<ConnectionEntity>
 }

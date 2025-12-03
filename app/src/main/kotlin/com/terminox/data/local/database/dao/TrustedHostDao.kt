@@ -36,4 +36,7 @@ interface TrustedHostDao {
 
     @Query("SELECT COUNT(*) FROM trusted_hosts WHERE hostKey = :hostKey")
     suspend fun hostExists(hostKey: String): Int
+
+    @Query("SELECT * FROM trusted_hosts ORDER BY lastSeen DESC")
+    suspend fun getAllHosts(): List<TrustedHostEntity>
 }
