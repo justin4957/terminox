@@ -1,9 +1,11 @@
 package com.terminox.di
 
+import com.terminox.data.repository.AuditLogRepositoryImpl
 import com.terminox.data.repository.ConnectionRepositoryImpl
 import com.terminox.data.repository.KeySyncRepositoryImpl
 import com.terminox.data.repository.SshKeyRepositoryImpl
 import com.terminox.data.repository.TrustedHostRepositoryImpl
+import com.terminox.domain.repository.AuditLogRepository
 import com.terminox.domain.repository.ConnectionRepository
 import com.terminox.domain.repository.KeySyncRepository
 import com.terminox.domain.repository.SshKeyRepository
@@ -41,4 +43,10 @@ abstract class RepositoryModule {
     abstract fun bindKeySyncRepository(
         impl: KeySyncRepositoryImpl
     ): KeySyncRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindAuditLogRepository(
+        impl: AuditLogRepositoryImpl
+    ): AuditLogRepository
 }

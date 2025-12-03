@@ -11,6 +11,7 @@ import com.terminox.presentation.connections.ConnectionsScreen
 import com.terminox.presentation.discovery.ServerDiscoveryScreen
 import com.terminox.presentation.keys.KeyManagementScreen
 import com.terminox.presentation.pairing.QrPairingScreen
+import com.terminox.presentation.security.ConnectionHistoryScreen
 import com.terminox.presentation.settings.SettingsScreen
 import com.terminox.presentation.terminal.TerminalScreen
 
@@ -23,6 +24,7 @@ sealed class Screen(val route: String) {
     data object Settings : Screen("settings")
     data object QrPairing : Screen("qr-pairing")
     data object Discovery : Screen("discovery")
+    data object ConnectionHistory : Screen("connection-history")
 }
 
 @Composable
@@ -49,6 +51,9 @@ fun TerminoxNavHost(
                 },
                 onNavigateToDiscovery = {
                     navController.navigate(Screen.Discovery.route)
+                },
+                onNavigateToHistory = {
+                    navController.navigate(Screen.ConnectionHistory.route)
                 }
             )
         }
@@ -95,6 +100,12 @@ fun TerminoxNavHost(
                     navController.popBackStack()
                     navController.navigate(Screen.Terminal.createRoute(connection.id))
                 }
+            )
+        }
+
+        composable(Screen.ConnectionHistory.route) {
+            ConnectionHistoryScreen(
+                onNavigateBack = { navController.popBackStack() }
             )
         }
     }
