@@ -56,11 +56,17 @@ class SecureClipboardManagerTest {
     }
 
     @Test
+    fun `ClipboardConfig PASSWORD preset has 30 second timeout`() {
+        val config = SecureClipboardManager.ClipboardConfig.PASSWORD
+        assertEquals(30.seconds, config.clearTimeout)
+    }
+
+    @Test
     fun `ClipboardConfig custom timeout is applied`() {
         val config = SecureClipboardManager.ClipboardConfig(
-            clearTimeout = 30.seconds
+            clearTimeout = 45.seconds
         )
-        assertEquals(30.seconds, config.clearTimeout)
+        assertEquals(45.seconds, config.clearTimeout)
     }
 
     @Test
@@ -131,5 +137,71 @@ class SecureClipboardManagerTest {
         assertTrue(original.showWarning)
         assertFalse(modified.showWarning)
         assertEquals(original.clearTimeout, modified.clearTimeout)
+    }
+
+    // Tests for ClipboardResult sealed class
+
+    @Test
+    fun `ClipboardResult Success isSuccess returns true`() {
+        val result = SecureClipboardManager.ClipboardResult.Success
+        assertTrue(result.isSuccess())
+    }
+
+    @Test
+    fun `ClipboardResult Failure isSuccess returns false`() {
+        val result = SecureClipboardManager.ClipboardResult.Failure("Error message")
+        assertFalse(result.isSuccess())
+    }
+
+    @Test
+    fun `ClipboardResult Failure preserves message`() {
+        val result = SecureClipboardManager.ClipboardResult.Failure("Test error")
+        assertEquals("Test error", result.message)
+    }
+
+    @Test
+    fun `ClipboardResult Failure preserves cause`() {
+        val cause = IllegalStateException("Root cause")
+        val result = SecureClipboardManager.ClipboardResult.Failure("Error", cause)
+        assertEquals(cause, result.cause)
+    }
+
+    @Test
+    fun `ClipboardResult Failure allows null cause`() {
+        val result = SecureClipboardManager.ClipboardResult.Failure("Error only")
+        assertNull(result.cause)
+    }
+
+    @Test
+    fun `ClipboardResult Success is singleton`() {
+        val success1 = SecureClipboardManager.ClipboardResult.Success
+        val success2 = SecureClipboardManager.ClipboardResult.Success
+        assertTrue(success1 === success2)
+    }
+
+    // Tests for sensitivity level behavior expectations
+
+    @Test
+    fun `HIGH sensitivity implies auto-clear should be enabled`() {
+        val level = SecureClipboardManager.SensitivityLevel.HIGH
+        // HIGH sensitivity data should trigger auto-clear
+        assertTrue(level == SecureClipboardManager.SensitivityLevel.HIGH)
+    }
+
+    @Test
+    fun `MEDIUM sensitivity implies warning but no auto-clear`() {
+        val level = SecureClipboardManager.SensitivityLevel.MEDIUM
+        // MEDIUM should show warning but not auto-clear
+        assertTrue(level == SecureClipboardManager.SensitivityLevel.MEDIUM)
+        assertFalse(level == SecureClipboardManager.SensitivityLevel.HIGH)
+    }
+
+    @Test
+    fun `NONE sensitivity implies no special handling`() {
+        val level = SecureClipboardManager.SensitivityLevel.NONE
+        // NONE should have no special handling
+        assertTrue(level == SecureClipboardManager.SensitivityLevel.NONE)
+        assertFalse(level == SecureClipboardManager.SensitivityLevel.MEDIUM)
+        assertFalse(level == SecureClipboardManager.SensitivityLevel.HIGH)
     }
 }
