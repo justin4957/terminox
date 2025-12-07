@@ -50,6 +50,7 @@ Unit tests are located in `app/src/test/kotlin/com/terminox/`.
 | `security` | `RetentionPolicyTest` | Tests for scrollback retention policy configuration |
 | `security` | `SecureWipeTest` | Tests for secure memory wiping utilities |
 | `security` | `EncryptedLineTest` | Tests for encrypted line data class |
+| `security` | `SecureClipboardManagerTest` | Tests for secure clipboard with auto-clear and sensitive flags |
 
 ### Instrumented Tests
 
@@ -241,6 +242,7 @@ Or use the Gradle panel: `app > Tasks > verification > test`
 | Retention Policy | ✅ `RetentionPolicyTest` | - | Test expiration |
 | Secure Memory Wipe | ✅ `SecureWipeTest` | - | Verify cleanup |
 | Secure Terminal Emulator | - | - | Session encryption |
+| Clipboard Security | ✅ `SecureClipboardManagerTest` | - | Verify auto-clear |
 
 **Manual Test Checklist:**
 - [ ] Start SSH session and generate scrollback
@@ -249,11 +251,17 @@ Or use the Gradle panel: `app > Tasks > verification > test`
 - [ ] Test with SECURE retention policy - lines expire after 15 min
 - [ ] Test with MAXIMUM_SECURITY policy - lines expire after 5 min
 - [ ] Verify session encryption key deleted on session close
+- [ ] Copy SSH password → verify clipboard cleared after 60 seconds
+- [ ] Copy on Android 13+ → verify preview is hidden
+- [ ] Verify warning toast appears for sensitive copy operations
 
 **Android Studio Testing:**
 ```bash
 # Run encrypted scrollback tests
 ./gradlew testDebugUnitTest --tests "com.terminox.security.EncryptedScrollbackBufferTest"
+
+# Run clipboard security tests
+./gradlew testDebugUnitTest --tests "com.terminox.security.SecureClipboardManagerTest"
 
 # Run all security tests
 ./gradlew testDebugUnitTest --tests "com.terminox.security.*"
