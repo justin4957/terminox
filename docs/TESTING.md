@@ -36,6 +36,13 @@ Unit tests are located in `app/src/test/kotlin/com/terminox/`.
 | Package | Test Class | Description |
 |---------|------------|-------------|
 | `data.repository` | `ConnectionRepositoryImplTest` | Tests for connection CRUD operations |
+| `domain.session` | `SessionStateTest` | Tests for session state lifecycle |
+| `domain.session` | `SessionOutputTest` | Tests for session output types |
+| `domain.session` | `AuthenticationMethodTest` | Tests for authentication method types |
+| `domain.session` | `AuthenticationResultTest` | Tests for authentication results |
+| `domain.session` | `TerminalDisplayStateTest` | Tests for terminal display state |
+| `domain.session` | `DisplayCellTest` | Tests for display cell data class |
+| `domain.session` | `DisplayLineTest` | Tests for display line data class |
 | `security` | `EncryptedScrollbackBufferTest` | Tests for encrypted scrollback buffer encryption/decryption |
 | `security` | `RetentionPolicyTest` | Tests for scrollback retention policy configuration |
 | `security` | `SecureWipeTest` | Tests for secure memory wiping utilities |
@@ -247,6 +254,36 @@ Or use the Gradle panel: `app > Tasks > verification > test`
 
 # Run all security tests
 ./gradlew testDebugUnitTest --tests "com.terminox.security.*"
+```
+
+---
+
+### Phase 7: Terminal Session Abstraction Layer
+**Status:** ✅ Complete
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| TerminalSessionPort interface | ✅ `SessionStateTest` | - | - |
+| SessionState lifecycle | ✅ `SessionStateTest` | - | - |
+| SessionOutput types | ✅ `SessionOutputTest` | - | - |
+| Authentication abstraction | ✅ `AuthenticationMethodTest`, `AuthenticationResultTest` | - | - |
+| Terminal display state | ✅ `TerminalDisplayStateTest`, `DisplayCellTest`, `DisplayLineTest` | - | - |
+| SshTerminalSession adapter | - | - | SSH connection via abstraction |
+| TerminalSessionFactory | - | - | Session creation |
+
+**Manual Test Checklist:**
+- [ ] Create SSH connection using TerminalSessionFactory
+- [ ] Verify session state transitions (Connecting → AwaitingAuthentication → Connected)
+- [ ] Authenticate with password through SessionAuthenticator
+- [ ] Send input through TerminalSessionPort.write()
+- [ ] Verify terminal output flows through session abstraction
+- [ ] Resize terminal through abstraction
+- [ ] Disconnect session and verify cleanup
+
+**Android Studio Testing:**
+```bash
+# Run session abstraction tests
+./gradlew testDebugUnitTest --tests "com.terminox.domain.session.*"
 ```
 
 ---
