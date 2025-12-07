@@ -447,6 +447,7 @@ class EnhancedPtyProcess(
     val startTime: Instant = Instant.now()
 
     private val terminated = AtomicBoolean(false)
+    private val terminationMutex = Mutex()
     private var lastActivityTime = Instant.now()
     private var idleCheckJob: Job? = null
 
@@ -565,48 +566,81 @@ class EnhancedPtyProcess(
     /**
      * Gracefully terminates the process.
      *
+     * Uses mutex to prevent race conditions during termination.
+     * Implements exponential backoff for efficient polling.
+     *
      * @param gracePeriodMs Time to wait for graceful exit before force kill
      */
     suspend fun gracefulTerminate(gracePeriodMs: Long = 5000): Result<Unit> =
-        withContext(Dispatchers.IO) {
-            try {
-                if (terminated.getAndSet(true)) {
-                    return@withContext Result.success(Unit) // Already terminated
-                }
+        terminationMutex.withLock {
+            withContext(Dispatchers.IO) {
+                try {
+                    // Atomic check-and-set to prevent multiple termination attempts
+                    if (terminated.getAndSet(true)) {
+                        return@withContext Result.success(Unit) // Already terminated
+                    }
 
-                idleCheckJob?.cancel()
+                    idleCheckJob?.cancel()
 
-                if (!ptyProcess.isRunning) {
+                    // Check if process already exited
+                    if (!isProcessRunning()) {
+                        _state.value = ProcessState.TERMINATED
+                        backend.onProcessTerminated(id)
+                        return@withContext Result.success(Unit)
+                    }
+
+                    if (gracePeriodMs > 0 && lifecycleConfig.gracefulTermination) {
+                        // Try graceful termination first (SIGTERM on Unix)
+                        logger.debug("Sending SIGTERM to process $id")
+                        try {
+                            ptyProcess.destroy()
+                        } catch (e: Exception) {
+                            logger.warn("Error sending SIGTERM to process $id", e)
+                        }
+
+                        // Wait for graceful exit with exponential backoff
+                        val exitedGracefully = withTimeoutOrNull(gracePeriodMs) {
+                            var delayMs = 50L
+                            while (isProcessRunning()) {
+                                delay(delayMs)
+                                delayMs = (delayMs * 1.5).toLong().coerceAtMost(500)
+                            }
+                            true
+                        } ?: false
+
+                        // Force kill if still running
+                        if (!exitedGracefully && isProcessRunning()) {
+                            logger.warn("Process $id did not exit gracefully, force killing")
+                            try {
+                                ptyProcess.destroyForcibly()
+                            } catch (e: Exception) {
+                                logger.error("Error force killing process $id", e)
+                            }
+
+                            // Wait for force kill with bounded timeout
+                            withTimeoutOrNull(2000) {
+                                while (isProcessRunning()) {
+                                    delay(100)
+                                }
+                            } ?: run {
+                                logger.error("Process $id did not respond to SIGKILL within 2 seconds")
+                            }
+                        }
+                    } else {
+                        // Immediate termination (SIGKILL)
+                        try {
+                            ptyProcess.destroyForcibly()
+                        } catch (e: Exception) {
+                            logger.error("Error force killing process $id", e)
+                        }
+                    }
+
+                    // Collect exit code with timeout to prevent blocking
+                    _exitCode = withTimeoutOrNull(5000) {
+                        ptyProcess.waitFor()
+                    }
                     _state.value = ProcessState.TERMINATED
                     backend.onProcessTerminated(id)
-                    return@withContext Result.success(Unit)
-                }
-
-                if (gracePeriodMs > 0 && lifecycleConfig.gracefulTermination) {
-                    // Try graceful termination first
-                    logger.debug("Sending SIGTERM to process $id")
-                    ptyProcess.destroy()
-
-                    // Wait for graceful exit
-                    val exitedGracefully = withTimeoutOrNull(gracePeriodMs) {
-                        while (ptyProcess.isRunning) {
-                            delay(100)
-                        }
-                        true
-                    } ?: false
-
-                    if (!exitedGracefully && ptyProcess.isRunning) {
-                        logger.debug("Process $id did not exit gracefully, force killing")
-                        ptyProcess.destroyForcibly()
-                    }
-                } else {
-                    // Immediate termination
-                    ptyProcess.destroyForcibly()
-                }
-
-                _exitCode = ptyProcess.waitFor()
-                _state.value = ProcessState.TERMINATED
-                backend.onProcessTerminated(id)
 
                 logger.debug("Process $id terminated with exit code $_exitCode")
                 Result.success(Unit)
@@ -616,6 +650,19 @@ class EnhancedPtyProcess(
                 Result.failure(e)
             }
         }
+    }
+
+    /**
+     * Safely checks if the process is running, handling potential exceptions.
+     */
+    @Suppress("DEPRECATION")
+    private fun isProcessRunning(): Boolean {
+        return try {
+            ptyProcess.isRunning
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     override suspend fun waitFor(): Int = withContext(Dispatchers.IO) {
         ptyProcess.waitFor()

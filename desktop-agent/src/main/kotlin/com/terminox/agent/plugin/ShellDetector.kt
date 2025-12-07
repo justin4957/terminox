@@ -2,6 +2,8 @@ package com.terminox.agent.plugin
 
 import org.slf4j.LoggerFactory
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermission
 
 /**
  * Detects available shells on the system.
@@ -73,36 +75,87 @@ class ShellDetector(
 
     /**
      * Validates if a shell path is allowed and executable.
+     *
+     * Security checks performed:
+     * - Path traversal detection (.. sequences)
+     * - Canonical path resolution to prevent symlink attacks
+     * - File existence and executability
+     * - Regular file check (not directory/symlink to directory)
+     * - World-writable permission check (Unix)
+     * - Allowed shells whitelist validation
      */
     fun validateShell(shellPath: String): Result<ShellInfo> {
-        val file = File(shellPath)
-
-        // Check if file exists
-        if (!file.exists()) {
-            return Result.failure(IllegalArgumentException("Shell not found: $shellPath"))
-        }
-
-        // Check if executable
-        if (!file.canExecute()) {
-            return Result.failure(SecurityException("Shell not executable: $shellPath"))
-        }
-
-        // Check against allowed shells if configured
-        if (config.allowedShells.isNotEmpty()) {
-            val normalizedPath = file.canonicalPath
-            val allowed = config.allowedShells.any { allowed ->
-                File(allowed).canonicalPath == normalizedPath
-            }
-            if (!allowed) {
+        return try {
+            // Security: Check for path traversal attempts
+            if (shellPath.contains("..") || shellPath.contains("./")) {
                 return Result.failure(
-                    SecurityException("Shell not in allowed list: $shellPath")
+                    SecurityException("Path traversal detected in shell path: $shellPath")
                 )
             }
-        }
 
-        val shellInfo = createShellInfo(shellPath)
-            ?: return Result.failure(IllegalStateException("Failed to create shell info for: $shellPath"))
-        return Result.success(shellInfo)
+            // Resolve canonical path immediately to prevent TOCTOU attacks
+            val file = File(shellPath).canonicalFile
+            val path = file.toPath()
+
+            // Check if file exists
+            if (!file.exists()) {
+                return Result.failure(IllegalArgumentException("Shell not found: $shellPath"))
+            }
+
+            // Check if it's a regular file (not directory or other special file)
+            if (!file.isFile) {
+                return Result.failure(
+                    SecurityException("Shell path is not a regular file: $shellPath")
+                )
+            }
+
+            // Check if executable
+            if (!file.canExecute()) {
+                return Result.failure(SecurityException("Shell not executable: $shellPath"))
+            }
+
+            // Unix-specific security checks
+            if (platform != PtyPlatform.WINDOWS) {
+                try {
+                    val permissions = Files.getPosixFilePermissions(path)
+                    // Reject world-writable shells (security risk)
+                    if (permissions.contains(PosixFilePermission.OTHERS_WRITE)) {
+                        return Result.failure(
+                            SecurityException("Shell is world-writable (security risk): $shellPath")
+                        )
+                    }
+                } catch (e: UnsupportedOperationException) {
+                    // Not a POSIX filesystem, skip permission check
+                    logger.debug("POSIX permissions not available for $shellPath")
+                }
+            }
+
+            // Check against allowed shells if configured
+            if (config.allowedShells.isNotEmpty()) {
+                val canonicalPath = file.canonicalPath
+                val allowed = config.allowedShells.any { allowed ->
+                    try {
+                        File(allowed).canonicalPath == canonicalPath
+                    } catch (e: Exception) {
+                        false
+                    }
+                }
+                if (!allowed) {
+                    return Result.failure(
+                        SecurityException("Shell not in allowed list: $shellPath")
+                    )
+                }
+            }
+
+            val shellInfo = createShellInfo(file.canonicalPath)
+                ?: return Result.failure(IllegalStateException("Failed to create shell info for: $shellPath"))
+            Result.success(shellInfo)
+        } catch (e: SecurityException) {
+            Result.failure(e)
+        } catch (e: Exception) {
+            logger.error("Shell validation failed for $shellPath", e)
+            Result.failure(SecurityException("Shell validation failed: ${e.message}", e))
+        }
     }
 
     /**

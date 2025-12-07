@@ -115,18 +115,70 @@ data class PtySecurityConfig(
     /** Chroot directory (null = no chroot) */
     val chrootDirectory: String? = null,
 
-    /** Environment variables to always remove */
+    /** Environment variables to always remove (security-sensitive) */
     val envBlacklist: Set<String> = setOf(
+        // Linux dynamic linker injection
         "LD_PRELOAD",
         "LD_LIBRARY_PATH",
-        "DYLD_INSERT_LIBRARIES",
-        "DYLD_LIBRARY_PATH",
         "LD_AUDIT",
         "LD_DEBUG",
         "LD_DEBUG_OUTPUT",
         "LD_PROFILE",
         "LD_SHOW_AUXV",
-        "MALLOC_TRACE"
+        // macOS dynamic linker injection
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FRAMEWORK_PATH",
+        "DYLD_FALLBACK_LIBRARY_PATH",
+        // Memory/debug tools
+        "MALLOC_TRACE",
+        "MALLOC_CHECK_",
+        // Shell startup injection
+        "BASH_ENV",
+        "ENV",
+        "ZDOTDIR",
+        "INPUTRC",
+        // Shell behavior manipulation
+        "PROMPT_COMMAND",
+        "PS1",
+        "PS2",
+        "PS4",
+        "IFS",
+        "SHELLOPTS",
+        "BASHOPTS",
+        "GLOBIGNORE",
+        "CDPATH",
+        // Language runtime injection
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "PERL5LIB",
+        "PERLLIB",
+        "PERL5OPT",
+        "RUBYLIB",
+        "RUBYOPT",
+        "NODE_PATH",
+        "NODE_OPTIONS",
+        // JVM injection
+        "JAVA_TOOL_OPTIONS",
+        "_JAVA_OPTIONS",
+        "CLASSPATH",
+        // History/logging manipulation
+        "HISTFILE",
+        "HISTCONTROL",
+        "HISTSIZE",
+        "HISTFILESIZE",
+        // Temp directory manipulation
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        // Terminal info injection
+        "TERMINFO",
+        "TERMINFO_DIRS",
+        "TERMCAP",
+        // Mail notification (info leak)
+        "MAIL",
+        "MAILPATH",
+        "MAILCHECK"
     ),
 
     /** Environment variables to always include (overrides blacklist) */
