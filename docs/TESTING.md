@@ -36,6 +36,10 @@ Unit tests are located in `app/src/test/kotlin/com/terminox/`.
 | Package | Test Class | Description |
 |---------|------------|-------------|
 | `data.repository` | `ConnectionRepositoryImplTest` | Tests for connection CRUD operations |
+| `security` | `EncryptedScrollbackBufferTest` | Tests for encrypted scrollback buffer encryption/decryption |
+| `security` | `RetentionPolicyTest` | Tests for scrollback retention policy configuration |
+| `security` | `SecureWipeTest` | Tests for secure memory wiping utilities |
+| `security` | `EncryptedLineTest` | Tests for encrypted line data class |
 
 ### Instrumented Tests
 
@@ -218,7 +222,36 @@ Or use the Gradle panel: `app > Tasks > verification > test`
 
 ---
 
-### Phase 7: Final Polish
+### Phase 7: Security Hardening (Session Data Encryption)
+**Status:** ✅ Complete
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| Encrypted Scrollback | ✅ `EncryptedScrollbackBufferTest` | - | Verify encryption |
+| Retention Policy | ✅ `RetentionPolicyTest` | - | Test expiration |
+| Secure Memory Wipe | ✅ `SecureWipeTest` | - | Verify cleanup |
+| Secure Terminal Emulator | - | - | Session encryption |
+
+**Manual Test Checklist:**
+- [ ] Start SSH session and generate scrollback
+- [ ] Verify scrollback is encrypted in memory (debug inspection)
+- [ ] Close session - verify secure wipe occurs
+- [ ] Test with SECURE retention policy - lines expire after 15 min
+- [ ] Test with MAXIMUM_SECURITY policy - lines expire after 5 min
+- [ ] Verify session encryption key deleted on session close
+
+**Android Studio Testing:**
+```bash
+# Run encrypted scrollback tests
+./gradlew testDebugUnitTest --tests "com.terminox.security.EncryptedScrollbackBufferTest"
+
+# Run all security tests
+./gradlew testDebugUnitTest --tests "com.terminox.security.*"
+```
+
+---
+
+### Phase 8: Final Polish
 **Status:** 🔲 Pending
 
 | Feature | Unit Tests | Instrumented Tests | Manual Tests |
@@ -326,4 +359,4 @@ class FeatureScreenTest {
 
 ---
 
-*Last updated: Phase 2 - SSH Core*
+*Last updated: Phase 7 - Security Hardening (Session Data Encryption)*
