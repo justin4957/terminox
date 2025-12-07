@@ -437,13 +437,13 @@ class SessionMetricsTest {
     @Test
     fun `Metrics uptime is non-negative`() {
         val metrics = SessionMetrics()
-        assertTrue(metrics.uptime.isPositive() || metrics.uptime.inWholeMilliseconds == 0L)
+        assertTrue(metrics.uptime.inWholeMilliseconds >= 0L)
     }
 
     @Test
     fun `Metrics idle time is non-negative`() {
         val metrics = SessionMetrics()
-        assertTrue(metrics.idleTime.isPositive() || metrics.idleTime.inWholeMilliseconds == 0L)
+        assertTrue(metrics.idleTime.inWholeMilliseconds >= 0L)
     }
 }
 
