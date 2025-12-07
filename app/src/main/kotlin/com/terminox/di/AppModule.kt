@@ -1,8 +1,10 @@
 package com.terminox.di
 
 import android.content.Context
+import com.terminox.domain.session.TerminalSessionFactory
 import com.terminox.protocol.ProtocolFactory
 import com.terminox.protocol.ProtocolFactoryImpl
+import com.terminox.protocol.session.TerminalSessionFactoryImpl
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -50,4 +52,8 @@ abstract class ProtocolModule {
     @Binds
     @Singleton
     abstract fun bindProtocolFactory(impl: ProtocolFactoryImpl): ProtocolFactory
+
+    @Binds
+    @Singleton
+    abstract fun bindTerminalSessionFactory(impl: TerminalSessionFactoryImpl): TerminalSessionFactory
 }
