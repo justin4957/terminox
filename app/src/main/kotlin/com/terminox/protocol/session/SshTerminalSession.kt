@@ -8,6 +8,7 @@ import com.terminox.domain.session.AuthenticationResult
 import com.terminox.domain.session.DisplayCell
 import com.terminox.domain.session.DisplayLine
 import com.terminox.domain.session.SessionAuthenticator
+import com.terminox.domain.session.SessionMetrics
 import com.terminox.domain.session.SessionOutput
 import com.terminox.domain.session.SessionState
 import com.terminox.domain.session.TerminalDisplayState
@@ -27,6 +28,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.security.PrivateKey
 import java.security.PublicKey
 
@@ -34,6 +37,14 @@ import java.security.PublicKey
  * SSH implementation of the TerminalSessionPort interface.
  * Wraps the SshProtocolAdapter and TerminalEmulator to provide
  * a unified session interface.
+ *
+ * ## Thread Safety
+ * All write operations are serialized using a Mutex to ensure thread-safe
+ * access to the underlying SSH connection.
+ *
+ * ## Resource Management
+ * This class implements Closeable. Always call [close] when done to release
+ * resources, or use Kotlin's `use {}` block.
  */
 class SshTerminalSession(
     override val id: String,
@@ -47,12 +58,19 @@ class SshTerminalSession(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var outputCollectionJob: Job? = null
     private var isAuthenticatedFlag = false
+    private var isClosed = false
+
+    /** Mutex for serializing write operations */
+    private val writeMutex = Mutex()
 
     private val _state = MutableStateFlow<SessionState>(SessionState.Connecting)
     override val state: StateFlow<SessionState> = _state.asStateFlow()
 
     private val _terminalState = MutableStateFlow(createTerminalDisplayState())
     override val terminalState: StateFlow<TerminalDisplayState> = _terminalState.asStateFlow()
+
+    private val _metrics = MutableStateFlow(SessionMetrics())
+    override val metrics: StateFlow<SessionMetrics> = _metrics.asStateFlow()
 
     override val output: Flow<SessionOutput> = sshAdapter.outputFlow(id).map { output ->
         when (output) {
@@ -74,7 +92,19 @@ class SshTerminalSession(
     // TerminalSessionPort implementation
 
     override suspend fun write(data: ByteArray): Result<Unit> {
-        return sshAdapter.sendInput(id, data)
+        if (isClosed) {
+            return Result.failure(IllegalStateException("Session is closed"))
+        }
+        return writeMutex.withLock {
+            val result = sshAdapter.sendInput(id, data)
+            if (result.isSuccess) {
+                updateMetrics { it.copy(
+                    bytesSent = it.bytesSent + data.size,
+                    lastActivityMs = System.currentTimeMillis()
+                )}
+            }
+            result
+        }
     }
 
     override suspend fun resize(columns: Int, rows: Int): Result<Unit> {
@@ -83,16 +113,58 @@ class SshTerminalSession(
     }
 
     override suspend fun disconnect(): Result<Unit> {
+        if (isClosed) {
+            return Result.success(Unit)
+        }
         _state.value = SessionState.Disconnecting
         outputCollectionJob?.cancel()
         val result = sshAdapter.disconnect(id)
         _state.value = SessionState.Disconnected()
-        scope.cancel()
         return result
     }
 
+    override suspend fun reconnect(): Result<Unit> {
+        val currentState = _state.value
+        if (currentState !is SessionState.Error || !currentState.recoverable) {
+            return Result.failure(IllegalStateException("Cannot reconnect from state: $currentState"))
+        }
+
+        updateMetrics { it.copy(reconnectAttempts = it.reconnectAttempts + 1) }
+        _state.value = SessionState.Connecting
+
+        return try {
+            val connectResult = sshAdapter.connect(connection)
+            if (connectResult.isSuccess) {
+                setAwaitingAuthentication()
+                Result.success(Unit)
+            } else {
+                val error = connectResult.exceptionOrNull()
+                _state.value = SessionState.Error(
+                    message = error?.message ?: "Reconnection failed",
+                    cause = error,
+                    recoverable = true
+                )
+                Result.failure(error ?: Exception("Reconnection failed"))
+            }
+        } catch (e: Exception) {
+            _state.value = SessionState.Error(
+                message = e.message ?: "Reconnection failed",
+                cause = e,
+                recoverable = true
+            )
+            Result.failure(e)
+        }
+    }
+
     override suspend fun isConnected(): Boolean {
-        return sshAdapter.isConnected(id)
+        return !isClosed && sshAdapter.isConnected(id)
+    }
+
+    override fun close() {
+        if (isClosed) return
+        isClosed = true
+        outputCollectionJob?.cancel()
+        scope.cancel()
     }
 
     override fun getTerminalSize(): TerminalSize {
@@ -214,6 +286,10 @@ class SshTerminalSession(
             sshAdapter.outputFlow(id).collect { output ->
                 when (output) {
                     is TerminalOutput.Data -> {
+                        updateMetrics { it.copy(
+                            bytesReceived = it.bytesReceived + output.bytes.size,
+                            lastActivityMs = System.currentTimeMillis()
+                        )}
                         emulator.processInput(output.bytes)
                     }
                     is TerminalOutput.Error -> {
@@ -229,6 +305,13 @@ class SshTerminalSession(
                 }
             }
         }
+    }
+
+    /**
+     * Thread-safe update of session metrics.
+     */
+    private inline fun updateMetrics(update: (SessionMetrics) -> SessionMetrics) {
+        _metrics.value = update(_metrics.value)
     }
 
     /**

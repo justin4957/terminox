@@ -1,5 +1,6 @@
 package com.terminox.domain.session
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -119,6 +120,40 @@ class SessionStateTest {
         )
         assertFalse(recoverableError.isActive())
         assertFalse(nonRecoverableError.isActive())
+    }
+
+    @Test
+    fun `Recoverable error state canReconnect returns true`() {
+        val state = SessionState.Error(
+            message = "Network timeout",
+            recoverable = true
+        )
+        assertTrue(state.canReconnect())
+    }
+
+    @Test
+    fun `Non-recoverable error state canReconnect returns false`() {
+        val state = SessionState.Error(
+            message = "Host key verification failed",
+            recoverable = false
+        )
+        assertFalse(state.canReconnect())
+    }
+
+    @Test
+    fun `Connected state canReconnect returns false`() {
+        val state = SessionState.Connected
+        assertFalse(state.canReconnect())
+    }
+
+    @Test
+    fun `Error state with errorCode preserves code`() {
+        val state = SessionState.Error(
+            message = "Connection refused",
+            errorCode = ErrorCode.CONNECTION_REFUSED,
+            recoverable = false
+        )
+        assertTrue(state.errorCode == ErrorCode.CONNECTION_REFUSED)
     }
 }
 
@@ -371,5 +406,106 @@ class DisplayLineTest {
         val cells = listOf(DisplayCell('A'))
         val line = DisplayLine(cells, wrapped = true)
         assertTrue(line.wrapped)
+    }
+}
+
+/**
+ * Unit tests for SessionMetrics.
+ */
+class SessionMetricsTest {
+
+    @Test
+    fun `Default metrics have zero counts`() {
+        val metrics = SessionMetrics()
+        assertEquals(0L, metrics.bytesReceived)
+        assertEquals(0L, metrics.bytesSent)
+        assertEquals(0, metrics.reconnectAttempts)
+    }
+
+    @Test
+    fun `Metrics with custom values`() {
+        val metrics = SessionMetrics(
+            bytesReceived = 1024L,
+            bytesSent = 512L,
+            reconnectAttempts = 2
+        )
+        assertEquals(1024L, metrics.bytesReceived)
+        assertEquals(512L, metrics.bytesSent)
+        assertEquals(2, metrics.reconnectAttempts)
+    }
+
+    @Test
+    fun `Metrics uptime is non-negative`() {
+        val metrics = SessionMetrics()
+        assertTrue(metrics.uptime.isPositive() || metrics.uptime.inWholeMilliseconds == 0L)
+    }
+
+    @Test
+    fun `Metrics idle time is non-negative`() {
+        val metrics = SessionMetrics()
+        assertTrue(metrics.idleTime.isPositive() || metrics.idleTime.inWholeMilliseconds == 0L)
+    }
+}
+
+/**
+ * Unit tests for ErrorCode enum.
+ */
+class ErrorCodeTest {
+
+    @Test
+    fun `All error codes are defined`() {
+        val expectedCodes = listOf(
+            ErrorCode.CONNECTION_REFUSED,
+            ErrorCode.CONNECTION_TIMEOUT,
+            ErrorCode.AUTHENTICATION_FAILED,
+            ErrorCode.HOST_KEY_VERIFICATION_FAILED,
+            ErrorCode.NETWORK_UNREACHABLE,
+            ErrorCode.SESSION_TERMINATED,
+            ErrorCode.PROTOCOL_ERROR,
+            ErrorCode.UNKNOWN
+        )
+        assertEquals(8, ErrorCode.entries.size)
+        expectedCodes.forEach { code ->
+            assertTrue(ErrorCode.entries.contains(code))
+        }
+    }
+}
+
+/**
+ * Unit tests for SessionOutput.ControlSignal sealed class.
+ */
+class ControlSignalTest {
+
+    @Test
+    fun `Bell signal is singleton`() {
+        val signal1 = SessionOutput.ControlSignal.Bell
+        val signal2 = SessionOutput.ControlSignal.Bell
+        assertTrue(signal1 === signal2)
+    }
+
+    @Test
+    fun `TitleChange signal preserves title`() {
+        val signal = SessionOutput.ControlSignal.TitleChange("bash - ~/projects")
+        assertEquals("bash - ~/projects", signal.title)
+    }
+
+    @Test
+    fun `ClipboardData signal preserves content`() {
+        val signal = SessionOutput.ControlSignal.ClipboardData("copied text")
+        assertEquals("copied text", signal.content)
+    }
+
+    @Test
+    fun `Custom signal preserves type and data`() {
+        val signal = SessionOutput.ControlSignal.Custom("custom-type", "custom-data")
+        assertEquals("custom-type", signal.type)
+        assertEquals("custom-data", signal.data)
+    }
+
+    @Test
+    fun `Custom signal allows null data`() {
+        val signal = SessionOutput.ControlSignal.Custom("type-only")
+        assertEquals("type-only", signal.type)
+        assertTrue(signal.data == null)
     }
 }

@@ -43,6 +43,9 @@ Unit tests are located in `app/src/test/kotlin/com/terminox/`.
 | `domain.session` | `TerminalDisplayStateTest` | Tests for terminal display state |
 | `domain.session` | `DisplayCellTest` | Tests for display cell data class |
 | `domain.session` | `DisplayLineTest` | Tests for display line data class |
+| `domain.session` | `SessionMetricsTest` | Tests for session metrics tracking |
+| `domain.session` | `ErrorCodeTest` | Tests for error code enum |
+| `domain.session` | `ControlSignalTest` | Tests for terminal control signals |
 | `security` | `EncryptedScrollbackBufferTest` | Tests for encrypted scrollback buffer encryption/decryption |
 | `security` | `RetentionPolicyTest` | Tests for scrollback retention policy configuration |
 | `security` | `SecureWipeTest` | Tests for secure memory wiping utilities |
@@ -268,6 +271,9 @@ Or use the Gradle panel: `app > Tasks > verification > test`
 | SessionOutput types | ✅ `SessionOutputTest` | - | - |
 | Authentication abstraction | ✅ `AuthenticationMethodTest`, `AuthenticationResultTest` | - | - |
 | Terminal display state | ✅ `TerminalDisplayStateTest`, `DisplayCellTest`, `DisplayLineTest` | - | - |
+| Session metrics | ✅ `SessionMetricsTest` | - | - |
+| Error codes | ✅ `ErrorCodeTest` | - | - |
+| Control signals | ✅ `ControlSignalTest` | - | - |
 | SshTerminalSession adapter | - | - | SSH connection via abstraction |
 | TerminalSessionFactory | - | - | Session creation |
 
