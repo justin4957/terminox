@@ -131,6 +131,69 @@ app/src/main/kotlin/com/terminox/
 - Ensure CI passes before merging
 - Include working code examples in PR descriptions
 
+## Multi-Agent PR Review Process
+
+After creating a pull request, run a multi-agent code review using `../multi_agent_coder`:
+
+### Review Command
+```bash
+cd /Users/coolbeans/Development/dev/multi_agent_coder && ./multi_agent_coder "Review this Kotlin Android code for PR #<number>: <title>
+
+<summary of changes and key files>
+
+Review for:
+1. Thread safety issues
+2. Security vulnerabilities
+3. Memory leak potential
+4. Android best practices
+5. Error handling gaps
+6. API compatibility concerns
+7. Testing coverage gaps"
+```
+
+### Post Review Comment
+After receiving reviews from all agents, create a consolidated PR comment with:
+1. **Agent-by-Agent Analysis**: Key points from each agent (OpenAI, Anthropic, DeepSeek, Gemini)
+2. **Comparison Chart**: Table comparing agent perspectives across dimensions
+3. **Severity Consensus**: Agreement matrix showing which issues are critical/high/medium
+4. **Token Usage & Cost Estimates**: Table showing tokens used and estimated cost per agent
+5. **Consolidated Action Items**: Prioritized checklist (Must Fix / Should Fix / Consider)
+
+Use `gh pr comment <number> --body "..."` to post the consolidated review.
+
+### Review Template Format
+```markdown
+# Multi-Agent Code Review Summary
+
+## 🔍 Agent-by-Agent Analysis
+### 🤖 OpenAI GPT-4
+[Key findings]
+
+### 🟣 Anthropic Claude
+[Key findings with code examples]
+
+### 🔷 DeepSeek Coder
+[Implementation-level findings]
+
+### 💎 Google Gemini
+[Architecture and security findings]
+
+## 📊 Comparison Chart
+| Dimension | OpenAI | Claude | DeepSeek | Gemini |
+|-----------|--------|--------|----------|--------|
+| Thread Safety | ... | ... | ... | ... |
+
+## 💰 Token Usage & Cost Estimates
+| Agent | Model | Tokens | Cost |
+|-------|-------|--------|------|
+| ... | ... | ... | ... |
+
+## ✅ Consolidated Action Items
+### Must Fix Before Merge (Critical)
+### Should Fix Soon (High)
+### Consider (Medium)
+```
+
 ## CI Pipeline
 
 GitHub Actions runs on every PR:
