@@ -2,7 +2,7 @@
 
 A comprehensive security threat model for the Terminox Android terminal application, documenting assets, threat actors, attack vectors, security boundaries, and mitigations.
 
-**Document Version**: 1.0
+**Document Version**: 1.1
 **Last Updated**: December 2024
 **Review Schedule**: Quarterly
 
@@ -63,6 +63,10 @@ Terminox is a secure Android terminal application for SSH/Mosh remote connection
 | **Terminal Settings** | Theme, font size, keyboard prefs | DataStore | App sandbox |
 | **Public Keys** | SSH public keys (mathematically safe) | Room database | None needed |
 | **App Preferences** | Non-sensitive user preferences | DataStore | App sandbox |
+| **Known Hosts Database** | SSH server fingerprints for TOFU | Room database | App sandbox |
+| **Session Tokens** | Temporary auth tokens for cloud sync | Memory/DataStore | App sandbox |
+| **Crash Reports** | Stack traces potentially containing paths | External (if enabled) | Scrubbing needed |
+| **Application Logs** | Debug/info logs from runtime | Logcat/files | Release filtering |
 
 ---
 
@@ -76,6 +80,8 @@ Terminox is a secure Android terminal application for SSH/Mosh remote connection
 | **Malicious WiFi Operator** | Data harvesting | Traffic analysis, DNS spoofing | Connection data, sync traffic |
 | **Cloud Provider** | Data mining, compliance | Access to encrypted sync data | Sync backups |
 | **Nation-State Actor** | Surveillance, access to target systems | Advanced persistent threats | All assets |
+| **Supply Chain Attacker** | Backdoor insertion, mass compromise | Dependency poisoning, build tampering | App binary, dependencies |
+| **Bot Network** | Credential stuffing, automated attacks | Distributed brute force | Pairing codes, SSH passwords |
 
 ### Local Threat Actors
 
@@ -416,6 +422,70 @@ Terminox is a secure Android terminal application for SSH/Mosh remote connection
 - [ ] Session re-authentication after lock
 - [ ] Remote session termination capability
 
+### AV-11: Clipboard Data Exposure
+
+| Attribute | Value |
+|-----------|-------|
+| **Vector** | Sensitive data copied to clipboard accessed by other apps |
+| **Likelihood** | Medium (common user behavior, clipboard accessible to other apps) |
+| **Impact** | High - Credential or session data exposure |
+| **Current Mitigation** | None |
+| **Residual Risk** | All clipboard operations potentially exposable |
+
+**Additional Mitigations**:
+- [ ] Implement clipboard timeout (auto-clear after 60 seconds)
+- [ ] Use Android 13+ clipboard preview hiding
+- [ ] Warn user when copying sensitive data
+- [ ] Provide secure copy option that bypasses clipboard
+
+### AV-12: Intent Hijacking
+
+| Attribute | Value |
+|-----------|-------|
+| **Vector** | Malicious app intercepts or spoofs Terminox intents |
+| **Likelihood** | Low (requires targeted attack) |
+| **Impact** | Medium - Could redirect connections or capture data |
+| **Current Mitigation** | Explicit intents for internal components |
+| **Residual Risk** | Deep links or exported components |
+
+**Additional Mitigations**:
+- [ ] Audit all exported components
+- [ ] Use signature-level permissions for IPC
+- [ ] Validate intent sources for deep links
+- [ ] Implement intent signature verification
+
+### AV-13: Overlay Attack (Tapjacking)
+
+| Attribute | Value |
+|-----------|-------|
+| **Vector** | Malicious overlay obscures UI to trick user actions |
+| **Likelihood** | Low (requires SYSTEM_ALERT_WINDOW permission) |
+| **Impact** | High - Could capture credentials or authorize malicious actions |
+| **Current Mitigation** | None |
+| **Residual Risk** | Critical dialogs vulnerable to overlay |
+
+**Additional Mitigations**:
+- [ ] Use filterTouchesWhenObscured for sensitive inputs
+- [ ] Detect overlay presence on security dialogs
+- [ ] Warn user of potential overlay attacks
+- [ ] Use fullscreen mode for password entry
+
+### AV-14: Time-of-Check to Time-of-Use (TOCTOU)
+
+| Attribute | Value |
+|-----------|-------|
+| **Vector** | Race condition between security check and key usage |
+| **Likelihood** | Very Low (timing-dependent) |
+| **Impact** | High - Biometric bypass potential |
+| **Current Mitigation** | Android Keystore atomicity |
+| **Residual Risk** | Custom authentication flows |
+
+**Additional Mitigations**:
+- [ ] Use cryptographic binding for biometric auth
+- [ ] Implement time-limited authentication tokens
+- [ ] Audit authentication flow for race conditions
+- [ ] Use setUserAuthenticationRequired with timeout
+
 ---
 
 ## OWASP Mobile Top 10 Analysis
@@ -634,14 +704,31 @@ Terminox is a secure Android terminal application for SSH/Mosh remote connection
 | Version | Date | Changes | Author |
 |---------|------|---------|--------|
 | 1.0 | Dec 2024 | Initial threat model | Claude Code |
+| 1.1 | Dec 2024 | Added AV-11 through AV-14, supply chain/bot threat actors, additional assets, expanded references | Claude Code |
 
 ---
 
 ## References
 
+### Primary Standards
 - [OWASP Mobile Security Testing Guide](https://owasp.org/www-project-mobile-security-testing-guide/)
 - [OWASP Mobile Top 10](https://owasp.org/www-project-mobile-top-10/)
+- [OWASP Mobile Application Security Verification Standard (MASVS)](https://owasp.org/www-project-mobile-security/)
 - [Android Security Best Practices](https://developer.android.com/topic/security/best-practices)
 - [Android Keystore System](https://developer.android.com/training/articles/keystore)
+
+### Cryptographic Standards
 - [SSH Protocol (RFC 4253)](https://datatracker.ietf.org/doc/html/rfc4253)
-- [NIST Cryptographic Standards](https://csrc.nist.gov/publications/fips)
+- [NIST Cryptographic Standards (FIPS)](https://csrc.nist.gov/publications/fips)
+- [NIST SP 800-57 Key Management](https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final)
+- [NIST SP 800-132 PBKDF Recommendation](https://csrc.nist.gov/publications/detail/sp/800-132/final)
+
+### Device Security
+- [CIS Android Benchmark](https://www.cisecurity.org/benchmark/google_android)
+- [Android Enterprise Security Best Practices](https://developers.google.com/android/work/overview)
+- [Google Play Integrity API](https://developer.android.com/google/play/integrity)
+
+### Threat Modeling
+- [STRIDE Threat Model](https://docs.microsoft.com/en-us/azure/security/develop/threat-modeling-tool-threats)
+- [PASTA Threat Modeling](https://owasp.org/www-pdf-archive/AppSecEU2012_PASTA.pdf)
+- [MITRE ATT&CK Mobile](https://attack.mitre.org/matrices/mobile/)
