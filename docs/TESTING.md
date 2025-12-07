@@ -302,7 +302,47 @@ Or use the Gradle panel: `app > Tasks > verification > test`
 
 ---
 
-### Phase 8: Final Polish
+### Phase 8: Desktop Agent Core Architecture
+**Status:** ✅ Complete
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| AgentConfig | ✅ `AgentConfigTest` | - | Configuration loading |
+| SessionRegistry | ✅ `SessionRegistryTest` | - | Session lifecycle |
+| WebSocket Server | - | - | Client connections |
+| Native PTY Backend | - | - | Terminal spawning |
+| Plugin Architecture | - | - | Backend registration |
+
+**Manual Test Checklist:**
+- [ ] Build and run desktop-agent: `cd desktop-agent && ./gradlew run`
+- [ ] Connect with WebSocket client to ws://localhost:4076/terminal
+- [ ] Create terminal session and verify output
+- [ ] Test session reconnection after disconnect
+- [ ] Verify graceful shutdown with `SIGTERM`
+- [ ] Check resource limits are enforced
+
+**Desktop Agent Testing:**
+```bash
+# Change to desktop-agent directory
+cd desktop-agent
+
+# Run unit tests
+./gradlew test
+
+# Run specific tests
+./gradlew test --tests "com.terminox.agent.session.SessionRegistryTest"
+./gradlew test --tests "com.terminox.agent.config.AgentConfigTest"
+
+# Build fat JAR
+./gradlew jar
+
+# Run the agent
+./gradlew run --args="--port 4076"
+```
+
+---
+
+### Phase 9: Final Polish
 **Status:** 🔲 Pending
 
 | Feature | Unit Tests | Instrumented Tests | Manual Tests |
