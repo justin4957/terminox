@@ -2,21 +2,17 @@ package com.terminox.security
 
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.mockkStatic
 import io.mockk.unmockkAll
 import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.security.KeyStore
-import java.util.Arrays
-import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
-import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 
 /**
  * Unit tests for EncryptedScrollbackBuffer core functionality.
@@ -169,7 +165,7 @@ class EncryptedScrollbackBufferTest {
         buffer.destroy()
 
         // Assert
-        assertFailsWith<IllegalStateException> {
+        assertThrows(IllegalStateException::class.java) {
             buffer.addLine("test")
         }
     }
@@ -180,7 +176,7 @@ class EncryptedScrollbackBufferTest {
         buffer.destroy()
 
         // Assert
-        assertFailsWith<IllegalStateException> {
+        assertThrows(IllegalStateException::class.java) {
             buffer.getLines(0, 1)
         }
     }
@@ -191,7 +187,7 @@ class EncryptedScrollbackBufferTest {
         buffer.destroy()
 
         // Assert
-        assertFailsWith<IllegalStateException> {
+        assertThrows(IllegalStateException::class.java) {
             buffer.getAllLines()
         }
     }
@@ -202,7 +198,7 @@ class EncryptedScrollbackBufferTest {
         buffer.destroy()
 
         // Assert
-        assertFailsWith<IllegalStateException> {
+        assertThrows(IllegalStateException::class.java) {
             buffer.clear()
         }
     }
