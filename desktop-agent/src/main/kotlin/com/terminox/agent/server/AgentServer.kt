@@ -1,11 +1,13 @@
 package com.terminox.agent.server
 
 import com.terminox.agent.config.AgentConfig
+import com.terminox.agent.config.AuthMethod
 import com.terminox.agent.plugin.BackendRegistry
 import com.terminox.agent.plugin.BackendType
 import com.terminox.agent.plugin.NativePtyBackend
 import com.terminox.agent.plugin.TerminalSessionConfig
 import com.terminox.agent.protocol.ClientMessage
+import com.terminox.agent.protocol.ErrorCodes
 import com.terminox.agent.protocol.ServerMessage
 import com.terminox.agent.session.SessionCreationConfig
 import com.terminox.agent.session.SessionRegistry
@@ -24,9 +26,13 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
+import java.security.MessageDigest
 import java.time.Duration
+import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -68,6 +74,8 @@ class AgentServer(
     private val backendRegistry = BackendRegistry()
     private val connections = ConcurrentHashMap<String, ClientConnection>()
     private val connectionCounter = AtomicInteger(0)
+    private val connectionMutex = Mutex()
+    private val startTime = Instant.now()
 
     private val _state = MutableStateFlow(ServerState.STOPPED)
     val state: StateFlow<ServerState> = _state.asStateFlow()
@@ -203,26 +211,36 @@ class AgentServer(
     }
 
     private suspend fun handleWebSocketConnection(session: WebSocketSession) {
-        // Check connection limit
-        if (connections.size >= config.resources.maxConnections) {
+        val connectionId = "conn-${connectionCounter.incrementAndGet()}"
+
+        // Atomic check-and-add to prevent TOCTOU race condition
+        val accepted = connectionMutex.withLock {
+            if (connections.size >= config.resources.maxConnections) {
+                false
+            } else {
+                val connection = ClientConnection(
+                    id = connectionId,
+                    session = session,
+                    config = config,
+                    sessionRegistry = sessionRegistry,
+                    backendRegistry = backendRegistry,
+                    json = json,
+                    scope = scope,
+                    getConnectionCount = { connections.size },
+                    getUptime = { Duration.between(startTime, Instant.now()).seconds }
+                )
+                connections[connectionId] = connection
+                true
+            }
+        }
+
+        if (!accepted) {
             logger.warn("Connection limit reached, rejecting new connection")
             session.close(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER, "Connection limit reached"))
             return
         }
 
-        val connectionId = "conn-${connectionCounter.incrementAndGet()}"
-        val connection = ClientConnection(
-            id = connectionId,
-            session = session,
-            config = config,
-            sessionRegistry = sessionRegistry,
-            backendRegistry = backendRegistry,
-            json = json,
-            scope = scope,
-            getConnectionCount = { connections.size }
-        )
-
-        connections[connectionId] = connection
+        val connection = connections[connectionId]!!
         _connectionCount.value = connections.size
         logger.info("New connection: $connectionId (total: ${connections.size})")
 
@@ -255,20 +273,27 @@ class AgentServer(
         } catch (e: Exception) {
             logger.error("Connection error: $connectionId", e)
         } finally {
-            // Cleanup connection
-            connections.remove(connectionId)
-            _connectionCount.value = connections.size
+            // Cleanup connection atomically
+            connectionMutex.withLock {
+                connections.remove(connectionId)
+                _connectionCount.value = connections.size
+            }
 
-            // Mark sessions as disconnected (not terminated)
-            sessionRegistry.getSessionsForConnection(connectionId).forEach { session ->
-                if (config.sessions.enableReconnection) {
-                    sessionRegistry.markDisconnected(session.id)
-                } else {
-                    sessionRegistry.terminateSession(session.id, "Connection closed")
+            // Clean up all sessions for this connection
+            val sessionsToCleanup = sessionRegistry.getSessionsForConnection(connectionId)
+            for (termSession in sessionsToCleanup) {
+                try {
+                    if (config.sessions.enableReconnection) {
+                        sessionRegistry.markDisconnected(termSession.id)
+                    } else {
+                        sessionRegistry.terminateSession(termSession.id, "Connection closed")
+                    }
+                } catch (e: Exception) {
+                    logger.error("Error cleaning up session ${termSession.id}", e)
                 }
             }
 
-            logger.info("Connection closed: $connectionId (remaining: ${connections.size})")
+            logger.info("Connection closed: $connectionId, cleaned up ${sessionsToCleanup.size} sessions (remaining: ${connections.size})")
         }
     }
 
@@ -301,6 +326,18 @@ class AgentServer(
 }
 
 /**
+ * Connection state for tracking authentication status.
+ */
+enum class ConnectionState {
+    /** Just connected, awaiting authentication */
+    CONNECTED,
+    /** Successfully authenticated */
+    AUTHENTICATED,
+    /** Connection closed */
+    CLOSED
+}
+
+/**
  * Represents a connected client.
  */
 class ClientConnection(
@@ -311,10 +348,16 @@ class ClientConnection(
     private val backendRegistry: BackendRegistry,
     private val json: Json,
     private val scope: CoroutineScope,
-    private val getConnectionCount: () -> Int
+    private val getConnectionCount: () -> Int,
+    private val getUptime: () -> Long
 ) {
     private val logger = LoggerFactory.getLogger(ClientConnection::class.java)
     private val sessionProcesses = ConcurrentHashMap<String, Job>()
+
+    @Volatile
+    private var connectionState = ConnectionState.CONNECTED
+    private var authFailureCount = 0
+    private var authLockedUntil: Instant? = null
 
     suspend fun sendMessage(message: ServerMessage) {
         try {
@@ -340,33 +383,139 @@ class ClientConnection(
     }
 
     suspend fun handleMessage(message: ClientMessage) {
+        // Authentication and info requests are always allowed
+        when (message) {
+            is ClientMessage.Authenticate -> {
+                handleAuthenticate(message)
+                return
+            }
+            is ClientMessage.Ping -> {
+                sendMessage(ServerMessage.Pong)
+                return
+            }
+            is ClientMessage.GetInfo -> {
+                handleGetInfo()
+                return
+            }
+            else -> {}
+        }
+
+        // All other messages require authentication (unless NONE auth method)
+        if (config.security.authMethod != AuthMethod.NONE && connectionState != ConnectionState.AUTHENTICATED) {
+            logger.warn("Connection $id attempted operation without authentication")
+            sendMessage(ServerMessage.Error(ErrorCodes.AUTH_REQUIRED, "Authentication required"))
+            return
+        }
+
         when (message) {
             is ClientMessage.CreateSession -> handleCreateSession(message)
             is ClientMessage.CloseSession -> handleCloseSession(message)
             is ClientMessage.Resize -> handleResize(message)
             is ClientMessage.ListSessions -> handleListSessions()
             is ClientMessage.Reconnect -> handleReconnect(message)
-            is ClientMessage.Ping -> sendMessage(ServerMessage.Pong)
-            is ClientMessage.Authenticate -> handleAuthenticate(message)
-            is ClientMessage.GetInfo -> handleGetInfo()
+            else -> {} // Already handled above
         }
     }
 
     private suspend fun handleAuthenticate(message: ClientMessage.Authenticate) {
-        // TODO: Implement proper authentication
-        sendMessage(ServerMessage.AuthResult(success = true))
+        // Check if connection is locked out due to too many failures
+        authLockedUntil?.let { lockoutEnd ->
+            if (Instant.now().isBefore(lockoutEnd)) {
+                val remainingSeconds = Duration.between(Instant.now(), lockoutEnd).seconds
+                logger.warn("Connection $id is locked out for $remainingSeconds more seconds")
+                sendMessage(ServerMessage.AuthResult(
+                    success = false,
+                    message = "Too many failed attempts. Try again in $remainingSeconds seconds"
+                ))
+                return
+            } else {
+                // Lockout expired
+                authLockedUntil = null
+                authFailureCount = 0
+            }
+        }
+
+        val authResult = when (config.security.authMethod) {
+            AuthMethod.NONE -> {
+                logger.warn("Authentication disabled - allowing connection $id without credentials")
+                true
+            }
+            AuthMethod.TOKEN -> {
+                validateToken(message.token)
+            }
+            AuthMethod.CERTIFICATE -> {
+                // mTLS is handled at the transport layer
+                // If we got here, the certificate was already validated
+                logger.info("Certificate-based authentication for connection $id")
+                true
+            }
+        }
+
+        if (authResult) {
+            connectionState = ConnectionState.AUTHENTICATED
+            authFailureCount = 0
+            val expiresAt = Instant.now().plusSeconds(config.security.tokenExpirationMinutes * 60)
+            logger.info("Connection $id authenticated successfully")
+            sendMessage(ServerMessage.AuthResult(
+                success = true,
+                expiresAt = expiresAt.toString()
+            ))
+        } else {
+            authFailureCount++
+            logger.warn("Authentication failed for connection $id (attempt $authFailureCount)")
+
+            if (authFailureCount >= config.security.maxAuthFailures) {
+                authLockedUntil = Instant.now().plusSeconds(config.security.authLockoutMinutes * 60)
+                logger.warn("Connection $id locked out for ${config.security.authLockoutMinutes} minutes")
+                sendMessage(ServerMessage.AuthResult(
+                    success = false,
+                    message = "Too many failed attempts. Locked out for ${config.security.authLockoutMinutes} minutes"
+                ))
+                session.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Too many auth failures"))
+            } else {
+                sendMessage(ServerMessage.AuthResult(
+                    success = false,
+                    message = "Authentication failed"
+                ))
+            }
+        }
+    }
+
+    /**
+     * Validates the authentication token using constant-time comparison.
+     */
+    private fun validateToken(providedToken: String): Boolean {
+        val expectedToken = config.security.authToken
+        if (expectedToken.isNullOrBlank()) {
+            logger.error("Token authentication configured but no authToken set in config")
+            return false
+        }
+
+        // Use constant-time comparison to prevent timing attacks
+        return try {
+            MessageDigest.isEqual(
+                providedToken.toByteArray(Charsets.UTF_8),
+                expectedToken.toByteArray(Charsets.UTF_8)
+            )
+        } catch (e: Exception) {
+            logger.error("Token validation error", e)
+            false
+        }
     }
 
     private suspend fun handleGetInfo() {
         sendMessage(ServerMessage.ServerInfo(
             version = "1.0.0",
             platform = System.getProperty("os.name"),
-            capabilities = com.terminox.agent.protocol.ServerCapabilities(),
+            capabilities = com.terminox.agent.protocol.ServerCapabilities(
+                requiresMtls = config.security.requireMtls,
+                maxSessionsPerConnection = config.resources.maxSessionsPerConnection
+            ),
             statistics = com.terminox.agent.protocol.ServerStats(
                 activeConnections = getConnectionCount(),
                 totalSessions = sessionRegistry.sessionCount.value,
                 activeSessions = sessionRegistry.getStatistics().activeSessions,
-                uptimeSeconds = 0
+                uptimeSeconds = getUptime()
             )
         ))
     }

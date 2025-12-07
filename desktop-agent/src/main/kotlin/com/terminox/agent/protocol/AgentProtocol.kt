@@ -33,7 +33,24 @@ sealed class ClientMessage {
         val rows: Int = 24,
         val environment: Map<String, String> = emptyMap(),
         val workingDirectory: String? = null
-    ) : ClientMessage()
+    ) : ClientMessage() {
+        init {
+            require(columns in 1..1000) { "Columns must be between 1 and 1000" }
+            require(rows in 1..500) { "Rows must be between 1 and 500" }
+            shell?.let {
+                require(it.isNotBlank()) { "Shell cannot be blank" }
+                require(it.length <= 1024) { "Shell path too long" }
+            }
+            require(environment.size <= 100) { "Too many environment variables (max 100)" }
+            environment.forEach { (key, value) ->
+                require(key.length <= 256) { "Environment key too long: ${key.take(32)}..." }
+                require(value.length <= 4096) { "Environment value too long for key: $key" }
+            }
+            workingDirectory?.let {
+                require(it.length <= 4096) { "Working directory path too long" }
+            }
+        }
+    }
 
     /**
      * Request to close a terminal session.
@@ -53,7 +70,14 @@ sealed class ClientMessage {
         val sessionId: String,
         val columns: Int,
         val rows: Int
-    ) : ClientMessage()
+    ) : ClientMessage() {
+        init {
+            require(sessionId.isNotBlank()) { "Session ID cannot be blank" }
+            require(sessionId.length <= 256) { "Session ID too long" }
+            require(columns in 1..1000) { "Columns must be between 1 and 1000" }
+            require(rows in 1..500) { "Rows must be between 1 and 500" }
+        }
+    }
 
     /**
      * Request to list all sessions for this connection.

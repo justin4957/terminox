@@ -123,8 +123,27 @@ data class SecurityConfig(
     val maxAuthFailures: Int = 5,
 
     /** Lockout duration after max auth failures */
-    val authLockoutMinutes: Long = 15
+    val authLockoutMinutes: Long = 15,
+
+    /** Authentication method */
+    val authMethod: AuthMethod = AuthMethod.TOKEN,
+
+    /** Pre-shared authentication token (required for TOKEN auth) */
+    val authToken: String? = null
 )
+
+/**
+ * Authentication method enumeration.
+ */
+@Serializable
+enum class AuthMethod {
+    /** No authentication required (NOT recommended for production) */
+    NONE,
+    /** Token-based authentication using pre-shared secret */
+    TOKEN,
+    /** Mutual TLS certificate-based authentication */
+    CERTIFICATE
+}
 
 /**
  * Session management configuration.

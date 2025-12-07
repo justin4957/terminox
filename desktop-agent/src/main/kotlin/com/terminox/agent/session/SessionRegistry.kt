@@ -29,8 +29,14 @@ class SessionRegistry(
 ) {
     private val logger = LoggerFactory.getLogger(SessionRegistry::class.java)
     private val sessions = ConcurrentHashMap<String, TerminalSession>()
+    // Use ConcurrentHashMap.newKeySet() for thread-safe sets
     private val connectionSessions = ConcurrentHashMap<String, MutableSet<String>>()
     private val mutex = Mutex()
+
+    /**
+     * Creates a thread-safe set for storing session IDs.
+     */
+    private fun createSessionSet(): MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     private val _sessionCount = MutableStateFlow(0)
     val sessionCount: StateFlow<Int> = _sessionCount.asStateFlow()
@@ -73,7 +79,7 @@ class SessionRegistry(
         )
 
         sessions[sessionId] = session
-        connectionSessions.getOrPut(connectionId) { mutableSetOf() }.add(sessionId)
+        connectionSessions.getOrPut(connectionId) { createSessionSet() }.add(sessionId)
 
         updateSessionMetrics()
         logger.info("Created session $sessionId for connection $connectionId")
@@ -187,7 +193,7 @@ class SessionRegistry(
         )
 
         sessions[sessionId] = reconnectedSession
-        connectionSessions.getOrPut(newConnectionId) { mutableSetOf() }.add(sessionId)
+        connectionSessions.getOrPut(newConnectionId) { createSessionSet() }.add(sessionId)
 
         updateSessionMetrics()
         logger.info("Reconnected session $sessionId to connection $newConnectionId")

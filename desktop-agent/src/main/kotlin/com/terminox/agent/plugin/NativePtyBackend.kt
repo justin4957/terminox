@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
+import java.io.File
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -53,9 +54,36 @@ class NativePtyBackend : TerminalBackend {
     override suspend fun createSession(config: TerminalSessionConfig): Result<TerminalProcess> =
         withContext(Dispatchers.IO) {
             try {
+                // Validate shell exists and is executable
+                val shellFile = File(config.shell)
+                if (!shellFile.exists()) {
+                    logger.error("Shell not found: ${config.shell}")
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Shell not found: ${config.shell}")
+                    )
+                }
+                if (!shellFile.canExecute()) {
+                    logger.error("Shell not executable: ${config.shell}")
+                    return@withContext Result.failure(
+                        SecurityException("Shell not executable: ${config.shell}")
+                    )
+                }
+
+                // Validate terminal dimensions
+                if (config.columns !in 1..1000) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Invalid columns: ${config.columns}. Must be 1-1000")
+                    )
+                }
+                if (config.rows !in 1..500) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Invalid rows: ${config.rows}. Must be 1-500")
+                    )
+                }
+
                 val processId = UUID.randomUUID().toString()
 
-                // Build environment
+                // Build environment with sanitization
                 val env = buildEnvironment(config)
 
                 // Create PTY process
@@ -69,18 +97,40 @@ class NativePtyBackend : TerminalBackend {
                     .setCygwin(false)
 
                 config.workingDirectory?.let {
-                    builder.setDirectory(it)
+                    val workDir = File(it)
+                    if (workDir.exists() && workDir.isDirectory) {
+                        builder.setDirectory(it)
+                    } else {
+                        logger.warn("Working directory does not exist, using home: $it")
+                    }
                 }
 
                 val ptyProcess = builder.start()
-                val process = NativePtyProcess(processId, ptyProcess)
+
+                // Verify process started successfully
+                if (!ptyProcess.isRunning) {
+                    return@withContext Result.failure(
+                        IOException("Process terminated immediately after start")
+                    )
+                }
+
+                val process = NativePtyProcess(processId, ptyProcess, this@NativePtyBackend)
                 processes[processId] = process
 
                 logger.info("Created PTY process $processId with shell: ${config.shell}")
                 Result.success(process)
-            } catch (e: Exception) {
-                logger.error("Failed to create PTY process", e)
+            } catch (e: IOException) {
+                logger.error("IO error creating PTY process", e)
+                Result.failure(IOException("Failed to start shell: ${e.message}", e))
+            } catch (e: SecurityException) {
+                logger.error("Security error creating PTY process", e)
                 Result.failure(e)
+            } catch (e: IllegalArgumentException) {
+                logger.error("Invalid argument creating PTY process", e)
+                Result.failure(e)
+            } catch (e: Exception) {
+                logger.error("Unexpected error creating PTY process", e)
+                Result.failure(IOException("Unexpected error: ${e.message}", e))
             }
         }
 
@@ -116,8 +166,21 @@ class NativePtyBackend : TerminalBackend {
         logger.debug("Process $processId removed from registry")
     }
 
+    /**
+     * Environment variables that should not be passed through for security.
+     */
+    private val envBlacklist = setOf(
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH"
+    )
+
     private fun buildEnvironment(config: TerminalSessionConfig): Map<String, String> {
         val env = System.getenv().toMutableMap()
+
+        // Remove potentially dangerous environment variables
+        envBlacklist.forEach { env.remove(it) }
 
         // Set terminal type
         env["TERM"] = "xterm-256color"
@@ -128,8 +191,12 @@ class NativePtyBackend : TerminalBackend {
             env["LANG"] = "en_US.UTF-8"
         }
 
-        // Add custom environment
-        env.putAll(config.environment)
+        // Add custom environment (sanitized)
+        config.environment
+            .filterKeys { it !in envBlacklist }
+            .filterKeys { it.length <= 256 }
+            .filterValues { it.length <= 4096 }
+            .forEach { (key, value) -> env[key] = value }
 
         return env
     }
@@ -140,7 +207,8 @@ class NativePtyBackend : TerminalBackend {
  */
 class NativePtyProcess(
     override val id: String,
-    private val ptyProcess: PtyProcess
+    private val ptyProcess: PtyProcess,
+    private val backend: NativePtyBackend? = null
 ) : TerminalProcess {
 
     private val logger = LoggerFactory.getLogger(NativePtyProcess::class.java)
@@ -176,6 +244,7 @@ class NativePtyProcess(
             } finally {
                 _exitCode = ptyProcess.waitFor()
                 _state.value = ProcessState.TERMINATED
+                backend?.onProcessTerminated(id)
                 close()
             }
         }
@@ -250,6 +319,7 @@ class NativePtyProcess(
                 ptyProcess.destroyForcibly()
             }
             _state.value = ProcessState.TERMINATED
+            backend?.onProcessTerminated(id)
             Result.success(Unit)
         } catch (e: Exception) {
             logger.error("Failed to terminate PTY", e)
