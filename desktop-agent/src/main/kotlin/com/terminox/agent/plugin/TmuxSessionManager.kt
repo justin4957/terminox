@@ -14,6 +14,7 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.util.concurrent.TimeUnit
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -74,7 +75,7 @@ class TmuxSessionManager : TerminalBackend {
                 Result.success(Unit)
             } else {
                 logger.warn("Tmux not found on system")
-                Result.failure(IOException("tmux executable not found"))
+                Result.failure(MultiplexerError.NotInstalled("tmux"))
             }
         } catch (e: Exception) {
             logger.error("Failed to initialize Tmux backend", e)
@@ -93,23 +94,22 @@ class TmuxSessionManager : TerminalBackend {
     override suspend fun createSession(config: TerminalSessionConfig): Result<TerminalProcess> =
         withContext(Dispatchers.IO) {
             val tmux = tmuxPath ?: return@withContext Result.failure(
-                IllegalStateException("Tmux not available")
+                MultiplexerError.NotInstalled("tmux")
             )
 
             try {
                 val sessionName = config.sessionName ?: "terminox-${UUID.randomUUID().toString().take(8)}"
 
-                // Validate session name (tmux restrictions)
-                if (!isValidSessionName(sessionName)) {
-                    return@withContext Result.failure(
-                        IllegalArgumentException("Invalid session name: $sessionName")
-                    )
+                // Validate session name using whitelist approach
+                MultiplexerValidation.validateTmuxSessionName(sessionName).onFailure { error ->
+                    logger.warn("Invalid session name '$sessionName': ${error.message}")
+                    return@withContext Result.failure(error)
                 }
 
                 // Check if session already exists
                 if (tmuxSessionExists(sessionName)) {
                     return@withContext Result.failure(
-                        IllegalStateException("Session already exists: $sessionName")
+                        MultiplexerError.SessionAlreadyExists(sessionName)
                     )
                 }
 
@@ -137,19 +137,32 @@ class TmuxSessionManager : TerminalBackend {
                     command.add(config.shell)
                 }
 
-                logger.debug("Creating tmux session: ${command.joinToString(" ")}")
+                val commandStr = command.joinToString(" ")
+                logger.debug("Creating tmux session: $commandStr")
 
-                // Create the session first
+                // Create the session first with timeout handling
                 val createProcess = ProcessBuilder(command)
                     .redirectErrorStream(true)
                     .start()
 
-                val createExitCode = createProcess.waitFor()
+                val completed = createProcess.waitFor(
+                    MultiplexerValidation.DEFAULT_COMMAND_TIMEOUT_MS,
+                    TimeUnit.MILLISECONDS
+                )
+                if (!completed) {
+                    createProcess.destroyForcibly()
+                    logger.error("Session creation timed out: $commandStr")
+                    return@withContext Result.failure(
+                        MultiplexerError.CommandTimeout(commandStr, MultiplexerValidation.DEFAULT_COMMAND_TIMEOUT_MS)
+                    )
+                }
+
+                val createExitCode = createProcess.exitValue()
                 if (createExitCode != 0) {
                     val error = createProcess.inputStream.bufferedReader().readText()
                     logger.error("Failed to create tmux session: $error")
                     return@withContext Result.failure(
-                        IOException("Failed to create tmux session: $error")
+                        MultiplexerError.CommandFailed(commandStr, createExitCode, error)
                     )
                 }
 
@@ -193,14 +206,14 @@ class TmuxSessionManager : TerminalBackend {
         config: TerminalSessionConfig
     ): Result<TerminalProcess> = withContext(Dispatchers.IO) {
         val tmux = tmuxPath ?: return@withContext Result.failure(
-            IllegalStateException("Tmux not available")
+            MultiplexerError.NotInstalled("tmux")
         )
 
         try {
             // Check if session exists
             if (!tmuxSessionExists(sessionId)) {
                 return@withContext Result.failure(
-                    IllegalArgumentException("Session not found: $sessionId")
+                    MultiplexerError.SessionNotFound(sessionId)
                 )
             }
 
@@ -252,14 +265,26 @@ class TmuxSessionManager : TerminalBackend {
                 "-F",
                 "#{session_name}|#{session_created}|#{session_attached}|#{session_width}|#{session_height}|#{session_windows}"
             )
+            val commandStr = command.joinToString(" ")
+            logger.debug("Listing tmux sessions: $commandStr")
 
             val process = ProcessBuilder(command)
                 .redirectErrorStream(true)
                 .start()
 
             val output = process.inputStream.bufferedReader().readText()
-            val exitCode = process.waitFor()
+            val completed = process.waitFor(
+                MultiplexerValidation.DEFAULT_COMMAND_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS
+            )
 
+            if (!completed) {
+                process.destroyForcibly()
+                logger.warn("List sessions timed out: $commandStr")
+                return@withContext emptyList()
+            }
+
+            val exitCode = process.exitValue()
             if (exitCode != 0) {
                 logger.debug("No tmux sessions found or tmux server not running")
                 return@withContext emptyList()
@@ -343,19 +368,19 @@ class TmuxSessionManager : TerminalBackend {
             val process = ProcessBuilder(tmux, "has-session", "-t", sessionName)
                 .redirectErrorStream(true)
                 .start()
-            process.waitFor() == 0
+            val completed = process.waitFor(
+                MultiplexerValidation.DEFAULT_COMMAND_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS
+            )
+            if (!completed) {
+                process.destroyForcibly()
+                logger.warn("Session existence check timed out for: $sessionName")
+                return false
+            }
+            process.exitValue() == 0
         } catch (e: Exception) {
             false
         }
-    }
-
-    /**
-     * Validates a tmux session name.
-     * Tmux session names cannot contain colons or periods.
-     */
-    private fun isValidSessionName(name: String): Boolean {
-        if (name.isBlank() || name.length > 256) return false
-        return !name.contains(':') && !name.contains('.')
     }
 
     /**

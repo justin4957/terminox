@@ -14,6 +14,7 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.util.concurrent.TimeUnit
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.time.Instant
@@ -72,7 +73,7 @@ class ScreenSessionManager : TerminalBackend {
                 Result.success(Unit)
             } else {
                 logger.warn("GNU Screen not found on system")
-                Result.failure(IOException("screen executable not found"))
+                Result.failure(MultiplexerError.NotInstalled("screen"))
             }
         } catch (e: Exception) {
             logger.error("Failed to initialize Screen backend", e)
@@ -91,23 +92,22 @@ class ScreenSessionManager : TerminalBackend {
     override suspend fun createSession(config: TerminalSessionConfig): Result<TerminalProcess> =
         withContext(Dispatchers.IO) {
             val screen = screenPath ?: return@withContext Result.failure(
-                IllegalStateException("Screen not available")
+                MultiplexerError.NotInstalled("screen")
             )
 
             try {
                 val sessionName = config.sessionName ?: "terminox-${UUID.randomUUID().toString().take(8)}"
 
-                // Validate session name
-                if (!isValidSessionName(sessionName)) {
-                    return@withContext Result.failure(
-                        IllegalArgumentException("Invalid session name: $sessionName")
-                    )
+                // Validate session name using whitelist approach
+                MultiplexerValidation.validateSessionName(sessionName).onFailure { error ->
+                    logger.warn("Invalid session name '$sessionName': ${error.message}")
+                    return@withContext Result.failure(error)
                 }
 
                 // Check if session already exists
                 if (screenSessionExists(sessionName)) {
                     return@withContext Result.failure(
-                        IllegalStateException("Session already exists: $sessionName")
+                        MultiplexerError.SessionAlreadyExists(sessionName)
                     )
                 }
 
@@ -123,9 +123,10 @@ class ScreenSessionManager : TerminalBackend {
                     createCommand.add(config.shell)
                 }
 
-                logger.debug("Creating screen session: ${createCommand.joinToString(" ")}")
+                val commandStr = createCommand.joinToString(" ")
+                logger.debug("Creating screen session: $commandStr")
 
-                // Create the session
+                // Create the session with timeout handling
                 val createProcessBuilder = ProcessBuilder(createCommand)
                     .redirectErrorStream(true)
 
@@ -137,13 +138,25 @@ class ScreenSessionManager : TerminalBackend {
                 }
 
                 val createProcess = createProcessBuilder.start()
-                val createExitCode = createProcess.waitFor()
+                val completed = createProcess.waitFor(
+                    MultiplexerValidation.DEFAULT_COMMAND_TIMEOUT_MS,
+                    TimeUnit.MILLISECONDS
+                )
 
+                if (!completed) {
+                    createProcess.destroyForcibly()
+                    logger.error("Session creation timed out: $commandStr")
+                    return@withContext Result.failure(
+                        MultiplexerError.CommandTimeout(commandStr, MultiplexerValidation.DEFAULT_COMMAND_TIMEOUT_MS)
+                    )
+                }
+
+                val createExitCode = createProcess.exitValue()
                 if (createExitCode != 0) {
                     val error = createProcess.inputStream.bufferedReader().readText()
                     logger.error("Failed to create screen session: $error")
                     return@withContext Result.failure(
-                        IOException("Failed to create screen session: $error")
+                        MultiplexerError.CommandFailed(commandStr, createExitCode, error)
                     )
                 }
 
@@ -195,14 +208,14 @@ class ScreenSessionManager : TerminalBackend {
         config: TerminalSessionConfig
     ): Result<TerminalProcess> = withContext(Dispatchers.IO) {
         val screen = screenPath ?: return@withContext Result.failure(
-            IllegalStateException("Screen not available")
+            MultiplexerError.NotInstalled("screen")
         )
 
         try {
             // Check if session exists
             if (!screenSessionExists(sessionId)) {
                 return@withContext Result.failure(
-                    IllegalArgumentException("Session not found: $sessionId")
+                    MultiplexerError.SessionNotFound(sessionId)
                 )
             }
 
@@ -248,20 +261,34 @@ class ScreenSessionManager : TerminalBackend {
 
         try {
             val command = listOf(screen, "-ls")
+            val commandStr = command.joinToString(" ")
+            logger.debug("Listing screen sessions: $commandStr")
 
             val process = ProcessBuilder(command)
                 .redirectErrorStream(true)
                 .start()
 
             val output = process.inputStream.bufferedReader().readText()
-            process.waitFor()
+            val completed = process.waitFor(
+                MultiplexerValidation.DEFAULT_COMMAND_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS
+            )
+
+            if (!completed) {
+                process.destroyForcibly()
+                logger.warn("List sessions timed out: $commandStr")
+                return@withContext emptyList()
+            }
 
             // Parse screen -ls output
-            // Example:
+            // Example formats across versions:
             //   There are screens on:
             //     12345.session1    (Detached)
             //     12346.session2    (Attached)
             //   2 Sockets in /var/run/screen/S-user.
+            //
+            // Some versions include timestamp:
+            //   12345.session_name (01/15/2024 10:30:00 AM) (Detached)
 
             parseScreenListOutput(output)
         } catch (e: Exception) {
@@ -334,7 +361,15 @@ class ScreenSessionManager : TerminalBackend {
                 .redirectErrorStream(true)
                 .start()
             val output = process.inputStream.bufferedReader().readText()
-            process.waitFor()
+            val completed = process.waitFor(
+                MultiplexerValidation.DEFAULT_COMMAND_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS
+            )
+            if (!completed) {
+                process.destroyForcibly()
+                logger.warn("Session existence check timed out for: $sessionName")
+                return false
+            }
             // Screen returns 0 if sessions found, 1 if no match
             output.contains(sessionName)
         } catch (e: Exception) {
@@ -343,29 +378,47 @@ class ScreenSessionManager : TerminalBackend {
     }
 
     /**
-     * Validates a screen session name.
-     */
-    private fun isValidSessionName(name: String): Boolean {
-        if (name.isBlank() || name.length > 256) return false
-        // Screen allows most characters except control characters
-        return name.all { it.isLetterOrDigit() || it in "-_." }
-    }
-
-    /**
      * Parses screen -ls output into ExternalSession list.
+     *
+     * Handles multiple GNU Screen output formats across versions:
+     * - Standard: "12345.session_name (Detached)"
+     * - With timestamp: "12345.session_name (01/15/2024 10:30:00 AM) (Detached)"
+     * - Multi-display: "12345.session_name (Multi, attached)"
      */
     private fun parseScreenListOutput(output: String): List<ExternalSession> {
         val sessions = mutableListOf<ExternalSession>()
-        val sessionPattern = Regex("""^\s*(\d+)\.(\S+)\s+\(([^)]+)\)""")
+
+        // Primary pattern: PID.name followed by parenthetical status
+        // More permissive to handle variations
+        val sessionPattern = Regex("""^\s*(\d+)\.(\S+)\s+(.*)$""")
 
         for (line in output.lines()) {
-            val match = sessionPattern.find(line) ?: continue
+            // Skip header and footer lines
+            if (line.contains("There is a screen") ||
+                line.contains("There are screens") ||
+                line.contains("Sockets in") ||
+                line.contains("Socket in") ||
+                line.contains("No Sockets found") ||
+                line.isBlank()) {
+                continue
+            }
+
+            val match = sessionPattern.find(line)
+            if (match == null) {
+                logger.trace("Skipping unmatched screen -ls line: $line")
+                continue
+            }
 
             val pid = match.groupValues[1]
             val name = match.groupValues[2]
-            val status = match.groupValues[3]
+            val statusPart = match.groupValues[3]
 
-            val attached = status.contains("Attached", ignoreCase = true)
+            // Extract status from the last parenthetical group
+            val statusMatch = Regex("""\(([^)]+)\)\s*$""").find(statusPart)
+            val status = statusMatch?.groupValues?.get(1) ?: "Unknown"
+
+            val attached = status.contains("Attached", ignoreCase = true) ||
+                          status.contains("Multi", ignoreCase = true)
             val sessionId = "$pid.$name"
 
             sessions.add(
@@ -383,6 +436,7 @@ class ScreenSessionManager : TerminalBackend {
             )
         }
 
+        logger.debug("Parsed ${sessions.size} screen sessions from output")
         return sessions
     }
 
