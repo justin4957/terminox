@@ -122,6 +122,18 @@ The protocol enforces strict size limits to prevent denial-of-service attacks:
 | 0x52 | PAUSE         | Client->Server | Pause data transmission          |
 | 0x53 | RESUME        | Client->Server | Resume data transmission         |
 
+### Multiplexer Frames (0x60-0x6F)
+
+| Code | Name                       | Direction      | Description                        |
+|------|----------------------------|----------------|------------------------------------|
+| 0x60 | MULTIPLEXER_LIST           | Client->Server | List external multiplexer sessions |
+| 0x61 | MULTIPLEXER_LIST_RESPONSE  | Server->Client | Available sessions list            |
+| 0x62 | MULTIPLEXER_ATTACH         | Client->Server | Attach to existing session         |
+| 0x63 | MULTIPLEXER_ATTACH_RESPONSE| Server->Client | Attach result                      |
+| 0x64 | MULTIPLEXER_CREATE         | Client->Server | Create new multiplexer session     |
+| 0x65 | MULTIPLEXER_CREATE_RESPONSE| Server->Client | Create result                      |
+| 0x66 | MULTIPLEXER_CAPABILITIES   | Server->Client | Multiplexer capabilities info      |
+
 ## Connection Lifecycle
 
 ### 1. Connection Establishment
@@ -230,6 +242,64 @@ message TerminalStateSnapshot {
 }
 ```
 
+### MultiplexerListRequest
+
+```protobuf
+message MultiplexerListRequest {
+    int32 multiplexer_type = 1;  // 0=NATIVE_PTY, 1=TMUX, 2=SCREEN
+    bool include_detached = 2;
+}
+```
+
+### MultiplexerListResponse
+
+```protobuf
+message MultiplexerListResponse {
+    int32 multiplexer_type = 1;
+    repeated MultiplexerSessionInfo sessions = 2;
+    bool available = 3;
+    string error_message = 4;
+}
+
+message MultiplexerSessionInfo {
+    string session_id = 1;
+    string session_name = 2;
+    bool attached = 3;
+    int32 columns = 4;
+    int32 rows = 5;
+    int32 window_count = 6;
+    string created_at = 7;
+    map<string, string> metadata = 8;
+}
+```
+
+### MultiplexerAttachRequest
+
+```protobuf
+message MultiplexerAttachRequest {
+    int32 request_id = 1;
+    int32 multiplexer_type = 2;
+    string external_session_id = 3;
+    int32 columns = 4;
+    int32 rows = 5;
+}
+```
+
+### MultiplexerCreateRequest
+
+```protobuf
+message MultiplexerCreateRequest {
+    int32 request_id = 1;
+    int32 multiplexer_type = 2;
+    string session_name = 3;
+    string shell = 4;
+    int32 columns = 5;
+    int32 rows = 6;
+    string working_directory = 7;
+    string initial_command = 8;
+}
+```
+
 ## Compression
 
 Compression is negotiated during capability exchange. Supported algorithms:
@@ -283,8 +353,15 @@ Default window size: 65536 bytes (64KB)
 
 Source files:
 - `MultiplexProtocol.kt` - Protocol constants, frame types, control messages
-- `SessionMessages.kt` - Session management and data transfer messages
+- `SessionMessages.kt` - Session management, data transfer, and multiplexer messages
 - `FrameCodec.kt` - Binary serialization/deserialization
+
+Backend implementations:
+- `TmuxSessionManager.kt` - Tmux session management via control mode (-CC)
+- `ScreenSessionManager.kt` - GNU Screen session management
 
 Test files:
 - `FrameCodecTest.kt` - Unit tests for frame codec operations
+- `MultiplexerMessagesTest.kt` - Unit tests for multiplexer protocol messages
+- `TmuxSessionManagerTest.kt` - Unit tests for tmux backend
+- `ScreenSessionManagerTest.kt` - Unit tests for screen backend

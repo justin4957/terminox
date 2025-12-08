@@ -479,3 +479,123 @@ data class PauseMessage(
 data class ResumeMessage(
     @ProtoNumber(1) val sessionId: Int // 0 = all sessions
 )
+
+// ============== Multiplexer Session Management ==============
+
+/**
+ * Multiplexer type enumeration.
+ */
+object MultiplexerType {
+    const val NATIVE_PTY = 0
+    const val TMUX = 1
+    const val SCREEN = 2
+}
+
+/**
+ * Request to list external multiplexer sessions (tmux/screen).
+ */
+@Serializable
+data class MultiplexerListRequest(
+    @ProtoNumber(1) val multiplexerType: Int = MultiplexerType.TMUX,
+    @ProtoNumber(2) val includeDetached: Boolean = true
+)
+
+/**
+ * Response with list of external multiplexer sessions.
+ */
+@Serializable
+data class MultiplexerListResponse(
+    @ProtoNumber(1) val multiplexerType: Int,
+    @ProtoNumber(2) val sessions: List<MultiplexerSessionInfo> = emptyList(),
+    @ProtoNumber(3) val available: Boolean = true,
+    @ProtoNumber(4) val errorMessage: String = ""
+)
+
+/**
+ * Information about an external multiplexer session.
+ */
+@Serializable
+data class MultiplexerSessionInfo(
+    @ProtoNumber(1) val sessionId: String,
+    @ProtoNumber(2) val sessionName: String,
+    @ProtoNumber(3) val attached: Boolean,
+    @ProtoNumber(4) val columns: Int = 0,
+    @ProtoNumber(5) val rows: Int = 0,
+    @ProtoNumber(6) val windowCount: Int = 1,
+    @ProtoNumber(7) val createdAt: String = "",
+    @ProtoNumber(8) val metadata: Map<String, String> = emptyMap()
+)
+
+/**
+ * Request to attach to an external multiplexer session.
+ */
+@Serializable
+data class MultiplexerAttachRequest(
+    @ProtoNumber(1) val requestId: Int,
+    @ProtoNumber(2) val multiplexerType: Int,
+    @ProtoNumber(3) val externalSessionId: String,
+    @ProtoNumber(4) val columns: Int = 80,
+    @ProtoNumber(5) val rows: Int = 24
+)
+
+/**
+ * Response to multiplexer attach request.
+ */
+@Serializable
+data class MultiplexerAttachResponse(
+    @ProtoNumber(1) val requestId: Int,
+    @ProtoNumber(2) val sessionId: Int,
+    @ProtoNumber(3) val success: Boolean,
+    @ProtoNumber(4) val errorMessage: String = "",
+    @ProtoNumber(5) val sessionName: String = "",
+    @ProtoNumber(6) val columns: Int = 80,
+    @ProtoNumber(7) val rows: Int = 24
+)
+
+/**
+ * Request to create a new multiplexer session.
+ */
+@Serializable
+data class MultiplexerCreateRequest(
+    @ProtoNumber(1) val requestId: Int,
+    @ProtoNumber(2) val multiplexerType: Int,
+    @ProtoNumber(3) val sessionName: String = "",
+    @ProtoNumber(4) val shell: String = "",
+    @ProtoNumber(5) val columns: Int = 80,
+    @ProtoNumber(6) val rows: Int = 24,
+    @ProtoNumber(7) val workingDirectory: String = "",
+    @ProtoNumber(8) val initialCommand: String = ""
+) {
+    init {
+        require(columns in 1..1000) { "Columns must be between 1 and 1000" }
+        require(rows in 1..500) { "Rows must be between 1 and 500" }
+    }
+}
+
+/**
+ * Response to multiplexer session creation.
+ */
+@Serializable
+data class MultiplexerCreateResponse(
+    @ProtoNumber(1) val requestId: Int,
+    @ProtoNumber(2) val sessionId: Int,
+    @ProtoNumber(3) val success: Boolean,
+    @ProtoNumber(4) val errorMessage: String = "",
+    @ProtoNumber(5) val externalSessionId: String = "",
+    @ProtoNumber(6) val sessionName: String = ""
+)
+
+/**
+ * Multiplexer capabilities information.
+ */
+@Serializable
+data class MultiplexerCapabilities(
+    @ProtoNumber(1) val multiplexerType: Int,
+    @ProtoNumber(2) val available: Boolean,
+    @ProtoNumber(3) val version: String = "",
+    @ProtoNumber(4) val supportsAttach: Boolean = true,
+    @ProtoNumber(5) val supportsPersistence: Boolean = true,
+    @ProtoNumber(6) val supportsMultiplePanes: Boolean = true,
+    @ProtoNumber(7) val supportsSharing: Boolean = true,
+    @ProtoNumber(8) val supportsCopyMode: Boolean = true
+)
