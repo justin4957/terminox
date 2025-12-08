@@ -42,6 +42,25 @@ All frames use big-endian byte order.
 - **Default Heartbeat Interval**: 30 seconds
 - **Heartbeat Timeout**: 100 seconds (miss 3 heartbeats)
 
+### Size Limits and Validation
+
+The protocol enforces strict size limits to prevent denial-of-service attacks:
+
+| Limit | Value | Description |
+|-------|-------|-------------|
+| Max Payload Length | 65,536 bytes | Maximum bytes in a single frame payload |
+| Min Payload Length | 0 bytes | Empty payloads are valid for some frame types |
+| Max Session ID | 2^31 - 1 | Signed 32-bit integer |
+| Max Scrollback Lines | 10,000 | Maximum lines in scrollback request |
+| Max Terminal Columns | 1,000 | Maximum terminal width |
+| Max Terminal Rows | 500 | Maximum terminal height |
+
+**Validation Rules:**
+- Payload length MUST be non-negative (reject negative values from signed int parsing)
+- Payload length MUST NOT exceed configured maximum (default 64KB)
+- Frames with invalid payload lengths are rejected with logging for security monitoring
+- Session IDs are validated to be within valid range
+
 ## Frame Types
 
 ### Control Frames (0x00-0x0F)

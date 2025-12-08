@@ -4,7 +4,7 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.decodeFromByteArray
 import kotlinx.serialization.encodeToByteArray
 import kotlinx.serialization.protobuf.ProtoBuf
-import java.io.ByteArrayOutputStream
+import org.slf4j.LoggerFactory
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
@@ -20,6 +20,7 @@ import java.nio.ByteOrder
 class FrameCodec(
     private val maxMessageSize: Int = MultiplexProtocol.MAX_MESSAGE_SIZE
 ) {
+    private val logger = LoggerFactory.getLogger(FrameCodec::class.java)
     private val protobuf = ProtoBuf { encodeDefaults = false }
 
     /**
@@ -61,8 +62,14 @@ class FrameCodec(
         val frameType = FrameType.fromCode(frameTypeCode)
             ?: throw IllegalArgumentException("Unknown frame type: 0x${frameTypeCode.toString(16)}")
 
-        require(payloadLength <= maxMessageSize) {
-            "Payload too large: $payloadLength bytes (max: $maxMessageSize)"
+        // Validate payload length (security: prevent negative length attacks and DoS via large allocations)
+        if (payloadLength < 0) {
+            logger.warn("Rejected frame with negative payload length: $payloadLength")
+            throw IllegalArgumentException("Invalid payload length: $payloadLength (must be non-negative)")
+        }
+        if (payloadLength > maxMessageSize) {
+            logger.warn("Rejected frame with excessive payload: $payloadLength bytes (max: $maxMessageSize)")
+            throw IllegalArgumentException("Payload too large: $payloadLength bytes (max: $maxMessageSize)")
         }
 
         require(bytes.size >= MultiplexProtocol.FRAME_HEADER_SIZE + payloadLength) {
@@ -100,8 +107,14 @@ class FrameCodec(
         val frameType = FrameType.fromCode(frameTypeCode)
             ?: throw IllegalArgumentException("Unknown frame type: 0x${frameTypeCode.toString(16)}")
 
-        require(payloadLength <= maxMessageSize) {
-            "Payload too large: $payloadLength bytes (max: $maxMessageSize)"
+        // Validate payload length (security: prevent negative length attacks and DoS via large allocations)
+        if (payloadLength < 0) {
+            logger.warn("Rejected frame from stream with negative payload length: $payloadLength")
+            throw IllegalArgumentException("Invalid payload length: $payloadLength (must be non-negative)")
+        }
+        if (payloadLength > maxMessageSize) {
+            logger.warn("Rejected frame from stream with excessive payload: $payloadLength bytes (max: $maxMessageSize)")
+            throw IllegalArgumentException("Payload too large: $payloadLength bytes (max: $maxMessageSize)")
         }
 
         // Read payload
