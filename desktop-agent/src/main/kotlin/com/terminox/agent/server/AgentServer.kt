@@ -5,7 +5,9 @@ import com.terminox.agent.config.AuthMethod
 import com.terminox.agent.plugin.BackendRegistry
 import com.terminox.agent.plugin.BackendType
 import com.terminox.agent.plugin.NativePtyBackend
+import com.terminox.agent.plugin.ScreenSessionManager
 import com.terminox.agent.plugin.TerminalSessionConfig
+import com.terminox.agent.plugin.TmuxSessionManager
 import com.terminox.agent.protocol.ClientMessage
 import com.terminox.agent.protocol.ErrorCodes
 import com.terminox.agent.protocol.ServerMessage
@@ -301,7 +303,11 @@ class AgentServer(
         // Register native PTY backend
         backendRegistry.register(NativePtyBackend())
 
-        // TODO: Register tmux and screen backends when implemented
+        // Register tmux backend for session multiplexing
+        backendRegistry.register(TmuxSessionManager())
+
+        // Register GNU Screen backend for session multiplexing
+        backendRegistry.register(ScreenSessionManager())
 
         // Initialize all backends
         val results = backendRegistry.initializeAll()

@@ -402,6 +402,78 @@ class FrameCodec(
         return protobuf.decodeFromByteArray(frame.payload)
     }
 
+    // ============== Multiplexer ==============
+
+    fun encodeMultiplexerList(msg: MultiplexerListRequest): Frame {
+        val payload = protobuf.encodeToByteArray(msg)
+        return createFrame(FrameType.MULTIPLEXER_LIST, MultiplexProtocol.CONTROL_SESSION_ID, payload)
+    }
+
+    fun decodeMultiplexerList(frame: Frame): MultiplexerListRequest {
+        validateFrameType(frame, FrameType.MULTIPLEXER_LIST)
+        return protobuf.decodeFromByteArray(frame.payload)
+    }
+
+    fun encodeMultiplexerListResponse(msg: MultiplexerListResponse): Frame {
+        val payload = protobuf.encodeToByteArray(msg)
+        return createFrame(FrameType.MULTIPLEXER_LIST_RESPONSE, MultiplexProtocol.CONTROL_SESSION_ID, payload)
+    }
+
+    fun decodeMultiplexerListResponse(frame: Frame): MultiplexerListResponse {
+        validateFrameType(frame, FrameType.MULTIPLEXER_LIST_RESPONSE)
+        return protobuf.decodeFromByteArray(frame.payload)
+    }
+
+    fun encodeMultiplexerAttach(msg: MultiplexerAttachRequest): Frame {
+        val payload = protobuf.encodeToByteArray(msg)
+        return createFrame(FrameType.MULTIPLEXER_ATTACH, MultiplexProtocol.CONTROL_SESSION_ID, payload)
+    }
+
+    fun decodeMultiplexerAttach(frame: Frame): MultiplexerAttachRequest {
+        validateFrameType(frame, FrameType.MULTIPLEXER_ATTACH)
+        return protobuf.decodeFromByteArray(frame.payload)
+    }
+
+    fun encodeMultiplexerAttachResponse(msg: MultiplexerAttachResponse): Frame {
+        val payload = protobuf.encodeToByteArray(msg)
+        return createFrame(FrameType.MULTIPLEXER_ATTACH_RESPONSE, msg.sessionId, payload)
+    }
+
+    fun decodeMultiplexerAttachResponse(frame: Frame): MultiplexerAttachResponse {
+        validateFrameType(frame, FrameType.MULTIPLEXER_ATTACH_RESPONSE)
+        return protobuf.decodeFromByteArray(frame.payload)
+    }
+
+    fun encodeMultiplexerCreate(msg: MultiplexerCreateRequest): Frame {
+        val payload = protobuf.encodeToByteArray(msg)
+        return createFrame(FrameType.MULTIPLEXER_CREATE, MultiplexProtocol.CONTROL_SESSION_ID, payload)
+    }
+
+    fun decodeMultiplexerCreate(frame: Frame): MultiplexerCreateRequest {
+        validateFrameType(frame, FrameType.MULTIPLEXER_CREATE)
+        return protobuf.decodeFromByteArray(frame.payload)
+    }
+
+    fun encodeMultiplexerCreateResponse(msg: MultiplexerCreateResponse): Frame {
+        val payload = protobuf.encodeToByteArray(msg)
+        return createFrame(FrameType.MULTIPLEXER_CREATE_RESPONSE, msg.sessionId, payload)
+    }
+
+    fun decodeMultiplexerCreateResponse(frame: Frame): MultiplexerCreateResponse {
+        validateFrameType(frame, FrameType.MULTIPLEXER_CREATE_RESPONSE)
+        return protobuf.decodeFromByteArray(frame.payload)
+    }
+
+    fun encodeMultiplexerCapabilities(msg: MultiplexerCapabilities): Frame {
+        val payload = protobuf.encodeToByteArray(msg)
+        return createFrame(FrameType.MULTIPLEXER_CAPABILITIES, MultiplexProtocol.CONTROL_SESSION_ID, payload)
+    }
+
+    fun decodeMultiplexerCapabilities(frame: Frame): MultiplexerCapabilities {
+        validateFrameType(frame, FrameType.MULTIPLEXER_CAPABILITIES)
+        return protobuf.decodeFromByteArray(frame.payload)
+    }
+
     // ============== Helpers ==============
 
     private fun createFrame(type: FrameType, sessionId: Int, payload: ByteArray): Frame {

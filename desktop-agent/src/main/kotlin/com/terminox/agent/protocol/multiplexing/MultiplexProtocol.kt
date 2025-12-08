@@ -99,7 +99,16 @@ enum class FrameType(val code: Byte) {
     FLOW_CONTROL(0x50),
     WINDOW_UPDATE(0x51),
     PAUSE(0x52),
-    RESUME(0x53);
+    RESUME(0x53),
+
+    // Multiplexer frames (0x60-0x6F)
+    MULTIPLEXER_LIST(0x60),
+    MULTIPLEXER_LIST_RESPONSE(0x61),
+    MULTIPLEXER_ATTACH(0x62),
+    MULTIPLEXER_ATTACH_RESPONSE(0x63),
+    MULTIPLEXER_CREATE(0x64),
+    MULTIPLEXER_CREATE_RESPONSE(0x65),
+    MULTIPLEXER_CAPABILITIES(0x66);
 
     companion object {
         private val codeMap = entries.associateBy { it.code }
