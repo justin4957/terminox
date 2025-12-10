@@ -476,6 +476,64 @@ cd desktop-agent
 
 ---
 
+### Phase 10: Bidirectional Data Streaming
+**Status:** ✅ Complete
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| Output Ring Buffer | ✅ `OutputRingBufferTest` | - | Buffer replay |
+| Adaptive Compression | ✅ `AdaptiveCompressorTest` | - | Network-based compression |
+| Streaming Data Service | ✅ `StreamingDataServiceTest` | - | Bidirectional streaming |
+| Reconnection Manager | ✅ `ReconnectionManagerTest` | - | Session reconnection |
+
+**Manual Test Checklist:**
+- [ ] Start desktop agent and create terminal session
+- [ ] Connect mobile client and verify sub-100ms latency
+- [ ] Verify terminal output streams to client
+- [ ] Verify keyboard input sent to terminal
+- [ ] Disconnect client, wait, then reconnect
+- [ ] Verify missed output is replayed on reconnection
+- [ ] Test with slow network (verify higher compression)
+- [ ] Test with fast network (verify lower compression)
+- [ ] Test multiple clients connected to same session
+- [ ] Test buffer eviction (fill > 2MB of output)
+
+**Desktop Agent Testing:**
+```bash
+# Change to desktop-agent directory
+cd desktop-agent
+
+# Run all streaming tests
+./gradlew test --tests "com.terminox.agent.streaming.*"
+
+# Run specific test classes
+./gradlew test --tests "com.terminox.agent.streaming.OutputRingBufferTest"
+./gradlew test --tests "com.terminox.agent.streaming.AdaptiveCompressorTest"
+./gradlew test --tests "com.terminox.agent.streaming.StreamingDataServiceTest"
+./gradlew test --tests "com.terminox.agent.streaming.ReconnectionManagerTest"
+```
+
+**Streaming Features:**
+| Feature | Description |
+|---------|-------------|
+| Ring Buffer | Circular buffer with configurable size (default 2MB, 20k chunks) |
+| Sequence Numbers | Monotonic ordering for reliable replay |
+| Adaptive Compression | DEFLATE compression level adjusts to network speed |
+| Network Categories | Fast (>1MB/s), Medium (100KB-1MB/s), Slow (<100KB/s) |
+| Flow Control | Credit-based window management per client |
+| Reconnection Window | 5 minute default window for session replay |
+| Multi-Client | Broadcasting output to all connected clients |
+
+**Performance Targets:**
+| Metric | Target |
+|--------|--------|
+| Output latency | < 100ms |
+| Input latency | < 50ms |
+| Compression ratio | < 0.5 for compressible data |
+| Replay buffer | 2MB or 20,000 chunks |
+
+---
+
 ### Phase 10: Final Polish
 **Status:** 🔲 Pending
 
@@ -584,4 +642,4 @@ class FeatureScreenTest {
 
 ---
 
-*Last updated: Phase 9 - Secure Pairing & Discovery (Secure Pairing Protocol)*
+*Last updated: Phase 10 - Bidirectional Data Streaming*
