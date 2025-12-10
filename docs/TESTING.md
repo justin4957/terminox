@@ -51,6 +51,7 @@ Unit tests are located in `app/src/test/kotlin/com/terminox/`.
 | `security` | `SecureWipeTest` | Tests for secure memory wiping utilities |
 | `security` | `EncryptedLineTest` | Tests for encrypted line data class |
 | `security` | `SecureClipboardManagerTest` | Tests for secure clipboard with auto-clear and sensitive flags |
+| `domain.model` | `DiscoveredAgentTest` | Tests for discovered agent model and capabilities |
 
 ### Instrumented Tests
 
@@ -342,7 +343,77 @@ cd desktop-agent
 
 ---
 
-### Phase 9: Final Polish
+### Phase 9: Secure Pairing & Discovery - mDNS Service Advertisement
+**Status:** ✅ Complete
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| Desktop Agent mDNS Advertiser | ✅ `AgentMdnsAdvertiserTest` | - | Service discovery |
+| TXT Record Capabilities | ✅ `AgentMdnsAdvertiserTest` | - | Capability parsing |
+| Android Agent Discovery | ✅ `DiscoveredAgentTest` | - | Agent detection |
+| IPv4/IPv6 Support | ✅ `AgentMdnsAdvertiserTest` | - | Multi-address discovery |
+| Real-time Availability | - | - | Agent online/offline |
+| Multiple Agents | - | - | Multi-agent network |
+
+**Manual Test Checklist:**
+- [ ] Start desktop agent with `--advertise` (default)
+- [ ] Verify agent advertises on local network interfaces
+- [ ] Start Android app and open agent discovery screen
+- [ ] Verify agents are discovered with correct info
+- [ ] Check TXT records: version, capabilities, auth method
+- [ ] Test with `--no-advertise` flag - agent not discoverable
+- [ ] Test with `--ipv6` flag - includes IPv6 addresses
+- [ ] Test with `--no-ipv6` flag - IPv4 only
+- [ ] Stop agent and verify it disappears from mobile app
+- [ ] Restart agent and verify it reappears
+- [ ] Test multiple agents on same network
+
+**Desktop Agent Testing:**
+```bash
+# Change to desktop-agent directory
+cd desktop-agent
+
+# Run mDNS advertiser tests
+./gradlew test --tests "com.terminox.agent.discovery.AgentMdnsAdvertiserTest"
+
+# Run all discovery tests
+./gradlew test --tests "com.terminox.agent.discovery.*"
+
+# Run agent with service discovery enabled (default)
+./gradlew run --args="--port 4076 --service-name my-workstation"
+
+# Run agent with service discovery disabled
+./gradlew run --args="--port 4076 --no-advertise"
+
+# Run agent with IPv4 only
+./gradlew run --args="--port 4076 --no-ipv6"
+```
+
+**Android App Testing:**
+```bash
+# Run agent discovery model tests
+./gradlew testDebugUnitTest --tests "com.terminox.domain.model.DiscoveredAgentTest"
+
+# Run all discovery-related tests
+./gradlew testDebugUnitTest --tests "com.terminox.domain.model.*Agent*"
+./gradlew testDebugUnitTest --tests "com.terminox.data.discovery.*"
+```
+
+**TXT Record Keys:**
+| Key | Description | Example Values |
+|-----|-------------|----------------|
+| `version` | Agent version | "1.0.0" |
+| `caps` | Capabilities | "pty,tmux,reconnect" |
+| `auth` | Auth method | "none", "token", "certificate" |
+| `tls` | TLS enabled | "true", "false" |
+| `mtls` | mTLS required | "true", "false" |
+| `platform` | OS platform | "macos", "linux", "windows" |
+| `sessions` | Max sessions | "10" |
+| `protocol` | Protocol type | "websocket" |
+
+---
+
+### Phase 10: Final Polish
 **Status:** 🔲 Pending
 
 | Feature | Unit Tests | Instrumented Tests | Manual Tests |
@@ -450,4 +521,4 @@ class FeatureScreenTest {
 
 ---
 
-*Last updated: Phase 7 - Security Hardening (Session Data Encryption)*
+*Last updated: Phase 9 - Secure Pairing & Discovery (mDNS Service Advertisement)*

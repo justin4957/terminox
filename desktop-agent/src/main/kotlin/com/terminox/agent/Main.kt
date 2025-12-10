@@ -69,6 +69,15 @@ class TerminoxAgent : CliktCommand(
     private val showVersion by option("--version", "-v", help = "Show version")
         .flag(default = false)
 
+    private val enableDiscovery by option("--advertise", help = "Enable mDNS service discovery")
+        .flag("--no-advertise", default = true)
+
+    private val enableIpv6 by option("--ipv6", help = "Enable IPv6 mDNS advertising")
+        .flag("--no-ipv6", default = true)
+
+    private val serviceName by option("--service-name", help = "mDNS service name")
+        .default("terminox-agent")
+
     override fun run() {
         if (showVersion) {
             echo("Terminox Agent v1.0.0")
@@ -77,12 +86,13 @@ class TerminoxAgent : CliktCommand(
 
         logger.info("Starting Terminox Agent...")
         logger.info("Host: $host, Port: $port, TLS: $enableTls")
+        logger.info("Service Discovery: $enableDiscovery, IPv6: $enableIpv6, Service Name: $serviceName")
 
         // Build configuration
         val config = buildConfig()
 
         // Create and start server
-        val server = AgentServer(config)
+        val server = AgentServer(config, enableIpv6Discovery = enableIpv6)
 
         // Register shutdown hook
         Runtime.getRuntime().addShutdownHook(Thread {
@@ -121,7 +131,9 @@ class TerminoxAgent : CliktCommand(
 
         val serverConfig = ServerConfig(
             host = host,
-            port = port
+            port = port,
+            enableServiceDiscovery = enableDiscovery,
+            serviceName = serviceName
         )
 
         val securityConfig = SecurityConfig(
