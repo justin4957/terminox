@@ -52,6 +52,7 @@ Unit tests are located in `app/src/test/kotlin/com/terminox/`.
 | `security` | `EncryptedLineTest` | Tests for encrypted line data class |
 | `security` | `SecureClipboardManagerTest` | Tests for secure clipboard with auto-clear and sensitive flags |
 | `domain.model` | `DiscoveredAgentTest` | Tests for discovered agent model and capabilities |
+| `domain.model.pairing` | `AgentPairingTest` | Tests for agent pairing models and states |
 
 ### Instrumented Tests
 
@@ -413,6 +414,68 @@ cd desktop-agent
 
 ---
 
+### Phase 9: Secure Pairing & Discovery - Secure Pairing Protocol
+**Status:** ✅ Complete
+
+| Feature | Unit Tests | Instrumented Tests | Manual Tests |
+|---------|------------|-------------------|--------------|
+| ECDH Key Exchange | ✅ `PairingProtocolTest` | - | Key agreement |
+| Verification Code (TOFU) | ✅ `PairingProtocolTest` | - | Code display |
+| Device Fingerprint Storage | ✅ `PairedDeviceStoreTest` | - | Persistence |
+| Rate Limiting | ✅ `PairingRateLimiterTest` | - | Brute force protection |
+| Exponential Backoff | ✅ `PairingRateLimiterTest` | - | Backoff timing |
+| QR Code Pairing | ✅ `QrPairingGenerator` | - | QR generation |
+| Pairing Revocation | ✅ `PairedDeviceStoreTest` | - | Device removal |
+| Android Models | ✅ `AgentPairingTest` | - | Model validation |
+
+**Manual Test Checklist:**
+- [ ] Initiate pairing on desktop agent
+- [ ] Scan QR code with mobile app
+- [ ] Verify 6-digit code matches on both devices
+- [ ] Confirm pairing on both devices
+- [ ] Verify device appears in paired devices list
+- [ ] Test reconnection with paired device
+- [ ] Test pairing revocation
+- [ ] Test rate limiting (multiple failed attempts)
+- [ ] Test pairing timeout (5 minute expiry)
+- [ ] Test multiple devices paired to same agent
+
+**Desktop Agent Testing:**
+```bash
+# Change to desktop-agent directory
+cd desktop-agent
+
+# Run all pairing tests
+./gradlew test --tests "com.terminox.agent.pairing.*"
+
+# Run specific test classes
+./gradlew test --tests "com.terminox.agent.pairing.PairingProtocolTest"
+./gradlew test --tests "com.terminox.agent.pairing.PairingRateLimiterTest"
+./gradlew test --tests "com.terminox.agent.pairing.PairedDeviceStoreTest"
+```
+
+**Android App Testing:**
+```bash
+# Run pairing model tests
+./gradlew testDebugUnitTest --tests "com.terminox.domain.model.pairing.AgentPairingTest"
+
+# Run all pairing-related tests
+./gradlew testDebugUnitTest --tests "com.terminox.domain.model.pairing.*"
+```
+
+**Security Features:**
+| Feature | Description |
+|---------|-------------|
+| ECDH P-256 | Elliptic curve Diffie-Hellman key exchange |
+| TOFU Verification | 6-digit code derived from shared secret |
+| AES-256-GCM | Authenticated session encryption |
+| Rate Limiting | 5 attempts per minute per device |
+| Exponential Backoff | 30s base, doubles each failure (max 5min) |
+| Lockout | 1 hour lockout after 10 failed attempts |
+| Session Timeout | 5 minute pairing window |
+
+---
+
 ### Phase 10: Final Polish
 **Status:** 🔲 Pending
 
@@ -521,4 +584,4 @@ class FeatureScreenTest {
 
 ---
 
-*Last updated: Phase 9 - Secure Pairing & Discovery (mDNS Service Advertisement)*
+*Last updated: Phase 9 - Secure Pairing & Discovery (Secure Pairing Protocol)*
