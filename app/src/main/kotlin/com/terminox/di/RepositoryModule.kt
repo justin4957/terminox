@@ -57,4 +57,11 @@ abstract class RepositoryModule {
     abstract fun bindSyncRepository(
         impl: SyncRepositoryImpl
     ): SyncRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindCertificateRepository(
+        impl: com.terminox.data.repository.CertificateRepositoryImpl
+    ): com.terminox.domain.repository.CertificateRepository
+
 }

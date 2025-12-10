@@ -15,6 +15,7 @@ data class Connection(
     val keyId: String? = null,
     val securityLevel: SecurityLevel = SecurityLevel.HOME_NETWORK,
     val customSecuritySettings: SecuritySettings? = null,
+    val serverCertificatePins: Set<String> = emptySet(), // New: SHA256 hashes of server certificate public keys
     val createdAt: Long = System.currentTimeMillis(),
     val lastConnectedAt: Long? = null
 ) {
@@ -46,6 +47,9 @@ sealed class AuthMethod {
 
     @Serializable
     data class PublicKey(val keyId: String) : AuthMethod()
+
+    @Serializable
+    data class ClientCertificate(val alias: String) : AuthMethod()
 
     @Serializable
     data object Agent : AuthMethod()
