@@ -8,7 +8,6 @@ import com.terminox.domain.repository.ConnectionRepository
 import com.terminox.domain.repository.CertificateRepository
 import com.terminox.security.InvalidPairingCodeException
 import com.terminox.security.CertificateGenerationResult
-import com.terminox.security.CertificateGenerationException
 import java.security.PrivateKey
 import java.security.cert.X509Certificate
 import java.security.Security

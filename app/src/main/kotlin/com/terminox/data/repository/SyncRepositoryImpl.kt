@@ -341,6 +341,7 @@ class SyncRepositoryImpl @Inject constructor(
                     authMethod = when (domain.authMethod) {
                         is AuthMethod.Password -> "PASSWORD"
                         is AuthMethod.PublicKey -> "PUBLIC_KEY"
+                        is AuthMethod.ClientCertificate -> "CLIENT_CERTIFICATE"
                         is AuthMethod.Agent -> "AGENT"
                     },
                     keyId = domain.keyId,

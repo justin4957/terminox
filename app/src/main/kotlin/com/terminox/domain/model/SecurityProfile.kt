@@ -182,6 +182,7 @@ data class SecuritySettings(
         return when (authMethod) {
             is AuthMethod.Password -> allowPassword
             is AuthMethod.PublicKey -> true
+            is AuthMethod.ClientCertificate -> true
             is AuthMethod.Agent -> true
         }
     }

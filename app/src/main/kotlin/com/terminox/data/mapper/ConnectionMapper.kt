@@ -54,6 +54,7 @@ fun Connection.toEntity(): ConnectionEntity {
         authMethod = when (authMethod) {
             is AuthMethod.Password -> "PASSWORD"
             is AuthMethod.PublicKey -> "PUBLIC_KEY"
+            is AuthMethod.ClientCertificate -> "CLIENT_CERTIFICATE"
             is AuthMethod.Agent -> "AGENT"
         },
         keyId = keyId,

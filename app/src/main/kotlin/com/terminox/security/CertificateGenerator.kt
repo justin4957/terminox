@@ -6,6 +6,7 @@ import android.security.KeyPairGeneratorSpec
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.math.BigInteger
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -19,7 +20,7 @@ import javax.security.auth.x500.X500Principal
 private const val TAG = "CertificateGenerator"
 
 @Singleton
-class CertificateGenerator @Inject constructor(private val context: Context) {
+class CertificateGenerator @Inject constructor(@ApplicationContext private val context: Context) {
 
     private val keyStore: KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
 
@@ -102,6 +103,7 @@ class CertificateGenerator @Inject constructor(private val context: Context) {
             val keyPairGenerator = KeyPairGenerator.getInstance(keyAlgorithm, ANDROID_KEYSTORE)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                @Suppress("WrongConstant") // Lint false positive - digests are valid KeyProperties constants
                 val builder = KeyGenParameterSpec.Builder(alias, purposes)
                     .setCertificateSubject(X500Principal(subjectDN))
                     .setDigests(*digests)
@@ -111,7 +113,9 @@ class CertificateGenerator @Inject constructor(private val context: Context) {
                     .setCertificateNotAfter(end.time)
                     .setUserAuthenticationRequired(userAuthenticationRequired)
 
+                @Suppress("WrongConstant") // Lint false positive - paddings are valid KeyProperties constants
                 encryptionPaddings?.let { builder.setEncryptionPaddings(*it) }
+                @Suppress("WrongConstant") // Lint false positive - paddings are valid KeyProperties constants
                 signaturePaddings?.let { builder.setSignaturePaddings(*it) }
 
                 keyPairGenerator.initialize(builder.build())
