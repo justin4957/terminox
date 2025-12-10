@@ -11,6 +11,7 @@ import com.terminox.domain.model.SessionState
 import com.terminox.domain.model.TerminalSession
 import com.terminox.domain.model.TerminalSize
 import com.terminox.domain.model.TrustLevel
+import com.terminox.domain.repository.CertificateRepository
 import com.terminox.domain.repository.TrustedHostRepository
 import com.terminox.protocol.TerminalOutput
 import com.terminox.protocol.TerminalProtocol
@@ -47,7 +48,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class SshProtocolAdapter @Inject constructor(
-    private val trustedHostRepository: TrustedHostRepository
+    private val trustedHostRepository: TrustedHostRepository,
+    private val certificateRepository: CertificateRepository
 ) : TerminalProtocol {
 
     override val protocolType = ProtocolType.SSH
@@ -272,6 +274,10 @@ class SshProtocolAdapter @Inject constructor(
                     // after retrieving the key from the repository
                     Log.d(TAG, "Connection uses PublicKey auth with keyId: ${authMethod.keyId}")
                 }
+                is AuthMethod.ClientCertificate -> {
+                    // Client certificate auth - the ViewModel will call authenticateWithClientCertificate
+                    Log.d(TAG, "Connection uses ClientCertificate auth with alias: ${authMethod.alias}")
+                }
                 is AuthMethod.Agent -> {
                     throw UnsupportedOperationException("Agent auth not yet supported")
                 }
@@ -466,6 +472,31 @@ class SshProtocolAdapter @Inject constructor(
     override suspend fun isConnected(sessionId: String): Boolean {
         val holder = sessions[sessionId] ?: return false
         return holder.clientSession.isOpen && (holder.channel?.isOpen ?: false)
+    }
+
+    /**
+     * Authenticates with a client certificate and opens shell channel.
+     */
+    suspend fun authenticateWithClientCertificate(
+        sessionId: String,
+        alias: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val holder = sessions[sessionId]
+                ?: return@withContext Result.failure(IllegalStateException("Session not found"))
+
+            val certData = certificateRepository.getClientCertificate(alias)
+                ?: return@withContext Result.failure(IllegalArgumentException("Client certificate with alias '$alias' not found."))
+
+            val keyPair = KeyPair(certData.certificate.publicKey, certData.privateKey)
+            holder.clientSession.addPublicKeyIdentity(keyPair)
+            holder.clientSession.auth().verify(AUTH_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+
+            openShellChannel(sessionId, holder)
+        } catch (e: Exception) {
+            Log.e(TAG, "Client certificate authentication failed", e)
+            Result.failure(e)
+        }
     }
 
     /**

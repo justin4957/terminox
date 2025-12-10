@@ -110,6 +110,10 @@ dependencies {
     // Crypto - Ed25519
     implementation(libs.eddsa)
 
+    // BouncyCastle for CSR generation
+    implementation(libs.bouncycastle.pkix)
+    implementation(libs.bouncycastle.prov)
+
     // Network
     implementation(libs.okhttp)
 

@@ -145,6 +145,7 @@ class TerminalViewModel @Inject constructor(
             val authMethodStr = when (connection.authMethod) {
                 is AuthMethod.Password -> "password"
                 is AuthMethod.PublicKey -> "publickey"
+                is AuthMethod.ClientCertificate -> "client-certificate"
                 is AuthMethod.Agent -> "agent"
             }
             auditLogRepository.logConnectionAttempt(
@@ -192,6 +193,10 @@ class TerminalViewModel @Inject constructor(
                         is AuthMethod.PublicKey -> {
                             // Authenticate with the stored key
                             authenticateWithStoredKey(session.sessionId, authMethod.keyId, connection)
+                        }
+                        is AuthMethod.ClientCertificate -> {
+                            // Authenticate with the client certificate
+                            authenticateWithClientCertificate(session.sessionId, authMethod.alias, connection)
                         }
                         is AuthMethod.Agent -> {
                             _uiState.update {
@@ -532,6 +537,83 @@ class TerminalViewModel @Inject constructor(
                     it.copy(
                         sessionState = SessionState.ERROR,
                         error = "Key authentication error: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Authenticates using a client certificate.
+     */
+    private fun authenticateWithClientCertificate(sessionId: String, alias: String, connection: Connection) {
+        viewModelScope.launch {
+            try {
+                Log.d(TAG, "Starting client certificate authentication for alias: $alias")
+
+                // Authenticate with the SSH adapter
+                val result = sshAdapter.authenticateWithClientCertificate(sessionId, alias)
+
+                result.fold(
+                    onSuccess = {
+                        Log.d(TAG, "Client certificate authentication successful")
+
+                        // Log successful authentication
+                        auditLogRepository.logConnectionSuccess(
+                            connectionId = connection.id,
+                            connectionName = connection.name,
+                            host = connection.host,
+                            port = connection.port,
+                            username = connection.username,
+                            authMethod = "client-certificate",
+                            keyFingerprint = "alias:$alias"
+                        )
+
+                        _uiState.update {
+                            it.copy(
+                                sessionState = SessionState.CONNECTED,
+                                terminalState = currentSession?.emulator?.state?.value ?: TerminalState()
+                            )
+                        }
+
+                        // Update last connected timestamp
+                        connectionRepository.updateLastConnected(
+                            connection.id,
+                            System.currentTimeMillis()
+                        )
+
+                        // Start collecting output
+                        startOutputCollection(sessionId)
+                        updateSessionList()
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Client certificate authentication failed", error)
+
+                        // Log authentication failure
+                        auditLogRepository.logConnectionFailed(
+                            connectionId = connection.id,
+                            connectionName = connection.name,
+                            host = connection.host,
+                            port = connection.port,
+                            username = connection.username,
+                            authMethod = "client-certificate",
+                            errorMessage = "Client certificate auth failed: ${error.message}"
+                        )
+
+                        _uiState.update {
+                            it.copy(
+                                sessionState = SessionState.ERROR,
+                                error = "Client certificate auth failed: ${error.message}"
+                            )
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Client certificate authentication error", e)
+                _uiState.update {
+                    it.copy(
+                        sessionState = SessionState.ERROR,
+                        error = "Client certificate auth error: ${e.message}"
                     )
                 }
             }

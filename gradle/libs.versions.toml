@@ -31,8 +31,11 @@ accompanistPermissions = "0.34.0"
 playServicesAuth = "21.2.0"
 googleApiClient = "2.7.0"
 googleApiServicesDrive = "v3-rev20241014-2.0.0"
+bouncycastle = "1.70" # Or a newer stable version
 
 [libraries]
+bouncycastle-pkix = { group = "org.bouncycastle", name = "bcpkix-jdk15on", version.ref = "bouncycastle" }
+bouncycastle-prov = { group = "org.bouncycastle", name = "bcprov-jdk15on", version.ref = "bouncycastle" }
 # Core Android
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
