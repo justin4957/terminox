@@ -2,6 +2,7 @@ package com.terminox.agent.server
 
 import com.terminox.agent.config.AgentConfig
 import com.terminox.agent.config.AuthMethod
+import com.terminox.agent.discovery.AgentMdnsAdvertiser
 import com.terminox.agent.plugin.BackendRegistry
 import com.terminox.agent.plugin.BackendType
 import com.terminox.agent.plugin.NativePtyBackend
@@ -57,7 +58,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * ```
  */
 class AgentServer(
-    private val config: AgentConfig
+    private val config: AgentConfig,
+    private val enableIpv6Discovery: Boolean = true
 ) {
     private val logger = LoggerFactory.getLogger(AgentServer::class.java)
     private val json = Json {
@@ -79,11 +81,20 @@ class AgentServer(
     private val connectionMutex = Mutex()
     private val startTime = Instant.now()
 
+    /** mDNS advertiser for service discovery */
+    private val mdnsAdvertiser = AgentMdnsAdvertiser(config)
+
     private val _state = MutableStateFlow(ServerState.STOPPED)
     val state: StateFlow<ServerState> = _state.asStateFlow()
 
     private val _connectionCount = MutableStateFlow(0)
     val connectionCount: StateFlow<Int> = _connectionCount.asStateFlow()
+
+    /** Current mDNS advertising state */
+    val advertisingState = mdnsAdvertiser.advertisingState
+
+    /** List of addresses where the agent is advertised */
+    val advertisedAddresses = mdnsAdvertiser.advertisedAddresses
 
     /**
      * Starts the agent server.
@@ -110,6 +121,19 @@ class AgentServer(
             _state.value = ServerState.RUNNING
             logger.info("Terminox Agent started successfully")
 
+            // Start mDNS service advertisement
+            if (config.server.enableServiceDiscovery) {
+                val advertisingStarted = mdnsAdvertiser.startAdvertising(enableIpv6Discovery)
+                if (advertisingStarted) {
+                    logger.info("Service discovery enabled - agent is discoverable on the network")
+                    mdnsAdvertiser.getAdvertisedAddresses().forEach { address ->
+                        logger.info("  Advertising on: $address")
+                    }
+                } else {
+                    logger.warn("Service discovery failed to start - agent may not be discoverable")
+                }
+            }
+
         } catch (e: Exception) {
             logger.error("Failed to start server", e)
             _state.value = ServerState.ERROR
@@ -129,6 +153,12 @@ class AgentServer(
         logger.info("Stopping Terminox Agent...")
 
         try {
+            // Stop mDNS advertising first
+            if (mdnsAdvertiser.isAdvertising()) {
+                logger.info("Stopping service advertisement...")
+                mdnsAdvertiser.stopAdvertising()
+            }
+
             // Notify all connections
             for (connection in connections.values) {
                 connection.sendMessage(ServerMessage.ServerShutdown(gracePeriodMs))
