@@ -2,15 +2,17 @@ package com.terminox.agent.streaming
 
 import com.terminox.agent.protocol.multiplexing.CompressionType
 import com.terminox.agent.protocol.multiplexing.FlowControlMessage
+import com.terminox.agent.protocol.multiplexing.ScrollbackRequest
+import com.terminox.agent.protocol.multiplexing.ScrollbackResponse
 import com.terminox.agent.protocol.multiplexing.TerminalInputData
 import com.terminox.agent.protocol.multiplexing.TerminalOutputData
+import com.terminox.agent.protocol.multiplexing.TerminalStateDelta
+import com.terminox.agent.protocol.multiplexing.TerminalStateSnapshot
 import com.terminox.agent.protocol.multiplexing.WindowUpdate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -82,6 +84,10 @@ class StreamingDataService(
     private val _state = MutableStateFlow(ServiceState.STOPPED)
     val state: StateFlow<ServiceState> = _state.asStateFlow()
 
+    // Terminal state sync
+    private val stateSynchronizer = TerminalStateSynchronizer(config.stateSyncConfig)
+    val stateSyncFlow: SharedFlow<StateSyncEvent> = stateSynchronizer.stateFlow
+
     // Statistics
     private val stats = StreamingStatistics()
 
@@ -107,6 +113,7 @@ class StreamingDataService(
         sessionCompressors.clear()
         sessionClients.clear()
         clientWindows.clear()
+        stateSynchronizer.clearAll()
         logger.info("Streaming data service stopped")
     }
 
@@ -128,6 +135,7 @@ class StreamingDataService(
         )
         sessionCompressors[sessionId] = AdaptiveCompressor(config.compressionConfig)
         sessionClients[sessionId] = ConcurrentHashMap.newKeySet()
+        stateSynchronizer.createSession(sessionId)
 
         logger.info("Created streaming session {}", sessionId)
         true
@@ -145,6 +153,7 @@ class StreamingDataService(
         clients?.forEach { client ->
             clientWindows.remove(client.clientId)
         }
+        stateSynchronizer.destroySession(sessionId)
         logger.info("Destroyed streaming session {}", sessionId)
     }
 
@@ -154,12 +163,16 @@ class StreamingDataService(
      * @param sessionId The session to subscribe to
      * @param client The client information
      * @param replayFromSequence Optional sequence number to replay from
+     * @param lastKnownStateSequence Optional state sequence to request deltas from
+     * @param scrollbackRequest Optional scrollback pagination request
      * @return ReplayResult with any replayed data
      */
     suspend fun registerClient(
         sessionId: Int,
         client: StreamingClient,
-        replayFromSequence: Long? = null
+        replayFromSequence: Long? = null,
+        lastKnownStateSequence: Long? = null,
+        scrollbackRequest: ScrollbackRequest? = null
     ): ReplayResult {
         val clients = sessionClients[sessionId]
             ?: return ReplayResult(success = false, error = "Session not found")
@@ -177,12 +190,24 @@ class StreamingDataService(
         logger.info("Registered client {} for session {}", client.clientId, sessionId)
         stats.clientConnections++
 
-        // Handle replay if requested
-        if (replayFromSequence != null) {
-            return replayOutput(sessionId, client, replayFromSequence)
+        val replayResult = if (replayFromSequence != null) {
+            replayOutput(sessionId, client, replayFromSequence)
+        } else {
+            ReplayResult(success = true, chunksReplayed = 0)
         }
 
-        return ReplayResult(success = true, chunksReplayed = 0)
+        val stateBundle = stateSynchronizer.prepareInitialState(
+            sessionId = sessionId,
+            lastKnownStateSequence = lastKnownStateSequence,
+            scrollbackStartLine = scrollbackRequest?.startLine ?: 0,
+            scrollbackLines = scrollbackRequest?.lineCount ?: config.stateSyncConfig.defaultScrollbackPageSize
+        )
+
+        return replayResult.copy(
+            stateSnapshot = stateBundle?.snapshot,
+            stateDeltas = stateBundle?.stateDeltas ?: emptyList(),
+            scrollback = stateBundle?.scrollback
+        )
     }
 
     /**
@@ -192,6 +217,51 @@ class StreamingDataService(
         sessionClients[sessionId]?.removeIf { it.clientId == clientId }
         clientWindows.remove(clientId)
         logger.info("Unregistered client {} from session {}", clientId, sessionId)
+    }
+
+    /**
+     * Updates the full terminal snapshot for a session.
+     */
+    suspend fun updateTerminalState(
+        sessionId: Int,
+        snapshot: TerminalStateSnapshot,
+        initial: Boolean = false,
+        targetClientId: String? = null
+    ) {
+        if (snapshot.sessionId != sessionId) {
+            throw IllegalArgumentException("Snapshot sessionId ${snapshot.sessionId} does not match $sessionId")
+        }
+        stateSynchronizer.updateSnapshot(snapshot, targetClientId, initial)
+    }
+
+    /**
+     * Applies a state delta to the cached snapshot for a session.
+     */
+    suspend fun applyStateDelta(
+        sessionId: Int,
+        delta: TerminalStateDelta,
+        targetClientId: String? = null
+    ) {
+        if (delta.sessionId != sessionId) {
+            throw IllegalArgumentException("Delta sessionId ${delta.sessionId} does not match $sessionId")
+        }
+        stateSynchronizer.applyDelta(delta, targetClientId)
+    }
+
+    suspend fun getStateSnapshot(sessionId: Int): TerminalStateSnapshot? {
+        return stateSynchronizer.getSnapshot(sessionId)
+    }
+
+    suspend fun getStateDeltas(sessionId: Int, sinceSequence: Long): List<TerminalStateDelta> {
+        return stateSynchronizer.getDeltaHistory(sessionId, sinceSequence)
+    }
+
+    suspend fun getScrollbackPage(
+        sessionId: Int,
+        startLine: Int,
+        lineCount: Int = config.stateSyncConfig.defaultScrollbackPageSize
+    ): ScrollbackResponse? {
+        return stateSynchronizer.getScrollbackPage(sessionId, startLine, lineCount)
     }
 
     /**
@@ -215,6 +285,9 @@ class StreamingDataService(
 
         // Store in ring buffer for replay
         val sequenceNumber = buffer.write(compressionResult.data, compressionResult.compressed)
+
+        // Track output for state sync and scrollback
+        stateSynchronizer.appendOutput(sessionId, data, sequenceNumber)
 
         // Create output message
         val outputData = TerminalOutputData(
@@ -463,7 +536,27 @@ data class StreamingConfig(
     /** Capacity of input buffer channel */
     val inputBufferCapacity: Int = 100,
     /** Compression configuration */
-    val compressionConfig: CompressionConfig = CompressionConfig()
+    val compressionConfig: CompressionConfig = CompressionConfig(),
+    /** State sync configuration */
+    val stateSyncConfig: StateSyncConfig = StateSyncConfig()
+)
+
+/**
+ * Configuration for terminal state synchronization.
+ */
+data class StateSyncConfig(
+    /** Default terminal columns when creating a session */
+    val defaultColumns: Int = 80,
+    /** Default terminal rows when creating a session */
+    val defaultRows: Int = 24,
+    /** Maximum scrollback lines to retain per session */
+    val maxScrollbackLines: Int = 5000,
+    /** Default number of lines to return in scrollback responses */
+    val defaultScrollbackPageSize: Int = 200,
+    /** Maximum number of cached deltas for differential sync */
+    val maxDeltaHistory: Int = 200,
+    /** Buffer capacity for state sync event flow */
+    val stateEventBuffer: Int = 200
 )
 
 /**
@@ -523,6 +616,9 @@ data class ReplayResult(
     val oldestAvailableSequence: Long? = null,
     val oldestReplayedSequence: Long? = null,
     val newestReplayedSequence: Long? = null,
+    val stateSnapshot: TerminalStateSnapshot? = null,
+    val stateDeltas: List<TerminalStateDelta> = emptyList(),
+    val scrollback: ScrollbackResponse? = null,
     val error: String? = null
 )
 

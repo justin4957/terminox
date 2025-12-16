@@ -2,6 +2,10 @@ package com.terminox.agent.streaming
 
 import com.terminox.agent.protocol.multiplexing.CompressionType
 import com.terminox.agent.protocol.multiplexing.FlowControlMessage
+import com.terminox.agent.protocol.multiplexing.StateUpdate
+import com.terminox.agent.protocol.multiplexing.StateUpdateType
+import com.terminox.agent.protocol.multiplexing.TerminalStateDelta
+import com.terminox.agent.protocol.multiplexing.TerminalStateSnapshot
 import com.terminox.agent.protocol.multiplexing.WindowUpdate
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -378,5 +382,134 @@ class StreamingDataServiceTest {
 
         assertTrue(stats.overallCompressionRatio < 1.0)
         assertTrue(stats.outputBytesCompressed < stats.outputBytesProcessed)
+    }
+
+    @Test
+    fun `registerClient returns state snapshot for initial attach`() = runBlocking {
+        service.createSession(1)
+
+        service.updateTerminalState(
+            sessionId = 1,
+            snapshot = TerminalStateSnapshot(
+                sessionId = 1,
+                columns = 120,
+                rows = 30,
+                cursorX = 4,
+                cursorY = 2,
+                cursorVisible = true,
+                screenContent = "prompt$".toByteArray(),
+                foregroundColor = 2,
+                backgroundColor = 0,
+                attributes = 1,
+                sequenceNumber = 10
+            ),
+            initial = true
+        )
+
+        val result = service.registerClient(1, StreamingClient(clientId = "state-client"))
+        val snapshot = result.stateSnapshot
+
+        assertNotNull(snapshot)
+        assertEquals(120, snapshot!!.columns)
+        assertEquals(4, snapshot.cursorX)
+        assertEquals(2, snapshot.cursorY)
+        assertEquals(1, snapshot.attributes)
+    }
+
+    @Test
+    fun `state delta updates cursor and colors`() = runBlocking {
+        service.createSession(1)
+        service.updateTerminalState(
+            sessionId = 1,
+            snapshot = TerminalStateSnapshot(
+                sessionId = 1,
+                columns = 80,
+                rows = 24,
+                cursorX = 0,
+                cursorY = 0,
+                foregroundColor = 7,
+                backgroundColor = 0,
+                attributes = 0,
+                sequenceNumber = 1
+            )
+        )
+
+        val delta = TerminalStateDelta(
+            sessionId = 1,
+            baseSequenceNumber = 1,
+            newSequenceNumber = 2,
+            updates = listOf(
+                StateUpdate(updateType = StateUpdateType.CURSOR_MOVE, row = 5, col = 10),
+                StateUpdate(updateType = StateUpdateType.COLOR_CHANGE, intValue = 3),
+                StateUpdate(updateType = StateUpdateType.ATTRIBUTE_CHANGE, intValue = 4)
+            )
+        )
+
+        service.applyStateDelta(1, delta)
+
+        val snapshot = service.getStateSnapshot(1)
+
+        assertEquals(10, snapshot?.cursorX)
+        assertEquals(5, snapshot?.cursorY)
+        assertEquals(3, snapshot?.foregroundColor)
+        assertEquals(4, snapshot?.attributes)
+    }
+
+    @Test
+    fun `client receives deltas when providing last known state sequence`() = runBlocking {
+        service.createSession(1)
+        service.updateTerminalState(
+            sessionId = 1,
+            snapshot = TerminalStateSnapshot(
+                sessionId = 1,
+                columns = 90,
+                rows = 28,
+                cursorX = 1,
+                cursorY = 1,
+                sequenceNumber = 5
+            )
+        )
+
+        val delta = TerminalStateDelta(
+            sessionId = 1,
+            baseSequenceNumber = 5,
+            newSequenceNumber = 6,
+            updates = listOf(
+                StateUpdate(updateType = StateUpdateType.CURSOR_MOVE, row = 3, col = 7)
+            )
+        )
+        service.applyStateDelta(1, delta)
+
+        val result = service.registerClient(
+            sessionId = 1,
+            client = StreamingClient(clientId = "delta-client"),
+            lastKnownStateSequence = 5
+        )
+
+        assertTrue(result.stateDeltas.isNotEmpty())
+        assertNull(result.stateSnapshot)
+
+        val snapshot = service.getStateSnapshot(1)
+        assertEquals(7, snapshot?.cursorX)
+        assertEquals(3, snapshot?.cursorY)
+    }
+
+    @Test
+    fun `scrollback pagination returns requested lines`() = runBlocking {
+        service.createSession(1)
+        val multiLine = (1..5).joinToString("\n") { "line$it" } + "\n"
+        service.processTerminalOutput(1, multiLine.toByteArray())
+
+        val response = service.getScrollbackPage(
+            sessionId = 1,
+            startLine = 1,
+            lineCount = 2
+        )
+
+        assertNotNull(response)
+        val payload = String(response!!.lines)
+        assertTrue(payload.contains("line2"))
+        assertTrue(payload.contains("line3"))
+        assertTrue(response.hasMore)
     }
 }
