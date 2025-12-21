@@ -144,6 +144,10 @@ dependencies {
     // Accompanist (Compose utilities)
     implementation(libs.accompanist.permissions)
 
+    // AWS SDK for Kotlin
+    implementation(libs.aws.sdk.core)
+    implementation(libs.aws.sdk.ec2)
+
     // Testing
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
