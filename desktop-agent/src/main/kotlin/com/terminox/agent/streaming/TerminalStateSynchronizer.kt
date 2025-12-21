@@ -32,7 +32,7 @@ class TerminalStateSynchronizer(
     /**
      * Creates tracking structures for a session if they do not already exist.
      */
-    suspend fun createSession(sessionId: Int, columns: Int = config.defaultColumns, rows: Int = config.defaultRows) = mutex.withLock {
+    suspend fun createSession(sessionId: Int, columns: Int = config.defaultColumns, rows: Int = config.defaultRows): Unit = mutex.withLock {
         sessions.computeIfAbsent(sessionId) {
             SessionState(
                 snapshot = TerminalStateSnapshot(
@@ -48,13 +48,15 @@ class TerminalStateSynchronizer(
                 scrollback = ScrollbackBuffer(config.maxScrollbackLines)
             )
         }
+        Unit
     }
 
     /**
      * Removes tracking data for a session.
      */
-    suspend fun destroySession(sessionId: Int) = mutex.withLock {
+    suspend fun destroySession(sessionId: Int): Unit = mutex.withLock {
         sessions.remove(sessionId)
+        Unit
     }
 
     /**

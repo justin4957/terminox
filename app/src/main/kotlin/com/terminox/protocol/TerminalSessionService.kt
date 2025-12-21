@@ -15,7 +15,14 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.terminox.R
 import com.terminox.presentation.MainActivity
+import com.terminox.protocol.agent.AgentConnectionManager
+import com.terminox.protocol.agent.AgentConnectionState
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import javax.inject.Inject
 
 /**
@@ -28,8 +35,15 @@ class TerminalSessionService : Service() {
     @Inject
     lateinit var protocolFactory: ProtocolFactory
 
+    @Inject
+    lateinit var agentConnectionManager: AgentConnectionManager
+
     private val binder = LocalBinder()
     private var activeSessions = 0
+    private var agentState = AgentConnectionState.DISCONNECTED
+
+    private val serviceJob = SupervisorJob()
+    private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
 
     inner class LocalBinder : Binder() {
         fun getService(): TerminalSessionService = this@TerminalSessionService
@@ -40,6 +54,12 @@ class TerminalSessionService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        observeAgentConnection()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        serviceJob.cancel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -52,14 +72,39 @@ class TerminalSessionService : Service() {
         return START_STICKY
     }
 
+    private fun observeAgentConnection() {
+        agentConnectionManager.connectionState.onEach { state ->
+            agentState = state
+            if (state == AgentConnectionState.CONNECTED || state == AgentConnectionState.RECONNECTING) {
+                if (activeSessions == 0) {
+                    // Ensure service is running in foreground if we have an agent connection
+                    startForegroundService()
+                } else {
+                    updateNotification()
+                }
+            } else if (activeSessions == 0) {
+                // If not connected and no sessions, stop
+                stopForegroundService()
+            } else {
+                updateNotification()
+            }
+        }.launchIn(serviceScope)
+    }
+
     private fun startForegroundService() {
         val notification = createNotification()
         startForeground(NOTIFICATION_ID, notification)
     }
 
     private fun stopForegroundService() {
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        // Only stop if no sessions AND no active agent connection
+        if (activeSessions <= 0 &&
+            agentState != AgentConnectionState.CONNECTED &&
+            agentState != AgentConnectionState.RECONNECTING) {
+
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
     }
 
     private fun onSessionStarted() {
@@ -99,15 +144,25 @@ class TerminalSessionService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val sessionText = if (activeSessions == 1) {
-            "1 active session"
-        } else {
-            "$activeSessions active sessions"
+        val sessionText = StringBuilder()
+        if (activeSessions > 0) {
+            sessionText.append(if (activeSessions == 1) "1 active session" else "$activeSessions active sessions")
+        }
+
+        if (agentState == AgentConnectionState.CONNECTED) {
+            if (sessionText.isNotEmpty()) sessionText.append(" • ")
+            sessionText.append("Agent connected")
+        } else if (agentState == AgentConnectionState.RECONNECTING) {
+            if (sessionText.isNotEmpty()) sessionText.append(" • ")
+            sessionText.append("Reconnecting agent...")
+        } else if (activeSessions == 0) {
+            // Fallback text if service is running but nothing seems active (shouldn't happen often)
+            sessionText.append("Terminox background service")
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Terminox")
-            .setContentText(sessionText)
+            .setContentText(sessionText.toString())
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
