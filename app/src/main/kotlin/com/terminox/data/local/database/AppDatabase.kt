@@ -4,11 +4,13 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import com.terminox.data.local.database.dao.ConnectionDao
 import com.terminox.data.local.database.dao.ConnectionEventDao
+import com.terminox.data.local.database.dao.Ec2InstanceDao
 import com.terminox.data.local.database.dao.PairedAgentDao
 import com.terminox.data.local.database.dao.SshKeyDao
 import com.terminox.data.local.database.dao.TrustedHostDao
 import com.terminox.data.local.database.entity.ConnectionEntity
 import com.terminox.data.local.database.entity.ConnectionEventEntity
+import com.terminox.data.local.database.entity.Ec2InstanceEntity
 import com.terminox.data.local.database.entity.PairedAgentEntity
 import com.terminox.data.local.database.entity.SshKeyEntity
 import com.terminox.data.local.database.entity.TrustedHostEntity
@@ -19,9 +21,10 @@ import com.terminox.data.local.database.entity.TrustedHostEntity
         SshKeyEntity::class,
         TrustedHostEntity::class,
         ConnectionEventEntity::class,
-        PairedAgentEntity::class
+        PairedAgentEntity::class,
+        Ec2InstanceEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -30,4 +33,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun trustedHostDao(): TrustedHostDao
     abstract fun connectionEventDao(): ConnectionEventDao
     abstract fun pairedAgentDao(): PairedAgentDao
+    abstract fun ec2InstanceDao(): Ec2InstanceDao
 }
