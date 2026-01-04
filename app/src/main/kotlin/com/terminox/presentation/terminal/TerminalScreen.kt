@@ -42,6 +42,8 @@ import com.terminox.domain.model.SessionState
 import com.terminox.domain.model.TerminalSettings
 import com.terminox.presentation.navigation.SessionDrawer
 import com.terminox.presentation.navigation.SessionInfo
+import com.terminox.domain.model.UnifiedSessionInfo
+import com.terminox.domain.model.SessionSource
 import com.terminox.presentation.settings.TerminalSettingsSheet
 import com.terminox.presentation.terminal.components.ClipboardAction
 import com.terminox.presentation.terminal.components.ClipboardActionBar
@@ -185,14 +187,17 @@ fun TerminalScreen(
 
     // Convert sessions for drawer
     val sessionList = uiState.sessions.map { session ->
-        SessionInfo(
+        UnifiedSessionInfo(
             sessionId = session.sessionId,
-            connectionId = session.connectionId,
-            connectionName = session.connectionName,
+            source = SessionSource.SSH, // All current sessions are SSH
+            name = session.connectionName,
             host = session.host,
             username = session.username,
             state = session.state,
-            isActive = session.sessionId == uiState.activeSessionId
+            isActive = session.sessionId == uiState.activeSessionId,
+            isPinned = false, // TODO: Add pinning support in ViewModel
+            displayOrder = 0, // TODO: Add ordering support in ViewModel
+            connectionId = session.connectionId
         )
     }
 
@@ -208,6 +213,12 @@ fun TerminalScreen(
                 },
                 onSessionClose = { sessionInfo ->
                     viewModel.closeSession(sessionInfo.sessionId)
+                },
+                onSessionPin = { sessionInfo ->
+                    // TODO: Implement pinning in ViewModel
+                },
+                onSessionReorder = { sessionInfo, newOrder ->
+                    // TODO: Implement reordering in ViewModel
                 },
                 onNewSession = {
                     scope.launch { drawerState.close() }
