@@ -3,12 +3,14 @@ package com.terminox.di
 import com.terminox.data.repository.AuditLogRepositoryImpl
 import com.terminox.data.repository.ConnectionRepositoryImpl
 import com.terminox.data.repository.KeySyncRepositoryImpl
+import com.terminox.data.repository.SnippetRepositoryImpl
 import com.terminox.data.repository.SshKeyRepositoryImpl
 import com.terminox.data.repository.SyncRepositoryImpl
 import com.terminox.data.repository.TrustedHostRepositoryImpl
 import com.terminox.domain.repository.AuditLogRepository
 import com.terminox.domain.repository.ConnectionRepository
 import com.terminox.domain.repository.KeySyncRepository
+import com.terminox.domain.repository.SnippetRepository
 import com.terminox.domain.repository.SshKeyRepository
 import com.terminox.domain.repository.SyncRepository
 import com.terminox.domain.repository.TrustedHostRepository
@@ -63,5 +65,11 @@ abstract class RepositoryModule {
     abstract fun bindCertificateRepository(
         impl: com.terminox.data.repository.CertificateRepositoryImpl
     ): com.terminox.domain.repository.CertificateRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindSnippetRepository(
+        impl: SnippetRepositoryImpl
+    ): SnippetRepository
 
 }
