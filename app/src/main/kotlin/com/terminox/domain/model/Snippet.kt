@@ -1,5 +1,7 @@
 package com.terminox.domain.model
 
+import kotlinx.serialization.Serializable
+
 /**
  * Represents a command snippet that can be saved and executed.
  *
@@ -115,6 +117,7 @@ data class Snippet(
  * @property isOptional Whether this variable is optional
  * @property validationPattern Optional regex pattern for validation
  */
+@Serializable
 data class SnippetVariable(
     val name: String,
     val description: String? = null,
