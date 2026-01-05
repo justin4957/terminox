@@ -55,11 +55,14 @@ data class Snippet(
         var result = command
         for (variable in variables) {
             val value = values[variable.name]
-            if (value == null && !variable.isOptional) {
+            val substitutionValue = value ?: variable.defaultValue
+
+            // If no value and no default, check if variable is required
+            if (substitutionValue == null && !variable.isOptional) {
                 return null // Required variable missing
             }
-            val substitutionValue = value ?: variable.defaultValue ?: ""
-            result = result.replace("\${${variable.name}}", substitutionValue)
+
+            result = result.replace("\${${variable.name}}", substitutionValue ?: "")
         }
         return result
     }
