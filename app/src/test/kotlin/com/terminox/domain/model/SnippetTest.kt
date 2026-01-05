@@ -263,9 +263,9 @@ class SnippetTest {
     fun `snippet with complex command and variables`() {
         val command = """
             docker run -d \
-              --name \${CONTAINER_NAME} \
-              -p \${PORT}:80 \
-              -e ENV=\${ENVIRONMENT} \
+              --name ${'$'}{CONTAINER_NAME} \
+              -p ${'$'}{PORT}:80 \
+              -e ENV=${'$'}{ENVIRONMENT} \
               nginx:latest
         """.trimIndent()
 
