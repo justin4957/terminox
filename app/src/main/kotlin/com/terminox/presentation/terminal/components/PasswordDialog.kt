@@ -17,6 +17,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import com.terminox.security.FullscreenProtection
+import com.terminox.security.OverlayProtectedView
 import kotlinx.coroutines.delay
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -24,6 +26,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 
 /**
  * Password input dialog for SSH authentication.
+ * Protected against overlay/tapjacking attacks (AV-13).
  */
 @Composable
 fun PasswordDialog(
@@ -32,6 +35,10 @@ fun PasswordDialog(
     onPasswordEntered: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    // Apply overlay protection (AV-13: Overlay Attack Protection)
+    OverlayProtectedView()
+    FullscreenProtection()
+
     var password by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
 
