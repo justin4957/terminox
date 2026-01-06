@@ -118,6 +118,48 @@ sealed class ClientMessage {
     @Serializable
     @SerialName("get_info")
     data object GetInfo : ClientMessage()
+
+    /**
+     * Copy content to desktop clipboard.
+     * Sent from mobile to desktop when user copies on mobile.
+     */
+    @Serializable
+    @SerialName("clipboard_copy")
+    data class ClipboardCopy(
+        val content: String,
+        val contentType: String = "text/plain",
+        val mimeType: String = "text/plain",
+        val timestamp: Long,
+        val isSensitive: Boolean = false,
+        val label: String? = null
+    ) : ClientMessage() {
+        init {
+            require(content.isNotEmpty()) { "Clipboard content cannot be empty" }
+            require(content.length <= MAX_CLIPBOARD_SIZE) {
+                "Clipboard content exceeds maximum size (${MAX_CLIPBOARD_SIZE} bytes)"
+            }
+            require(timestamp > 0) { "Timestamp must be positive" }
+        }
+
+        companion object {
+            const val MAX_CLIPBOARD_SIZE = 1024 * 1024 // 1 MB
+        }
+    }
+
+    /**
+     * Request clipboard history from desktop.
+     */
+    @Serializable
+    @SerialName("clipboard_history_request")
+    data class ClipboardHistoryRequest(
+        val maxItems: Int = 10
+    ) : ClientMessage() {
+        init {
+            require(maxItems in 1..50) {
+                "Max items must be between 1 and 50"
+            }
+        }
+    }
 }
 
 /**
@@ -223,7 +265,65 @@ sealed class ServerMessage {
         val message: String? = null,
         val expiresAt: String? = null
     ) : ServerMessage()
+
+    /**
+     * Clipboard content from desktop.
+     * Sent from desktop to mobile when user copies on desktop.
+     */
+    @Serializable
+    @SerialName("clipboard_copied")
+    data class ClipboardCopied(
+        val itemId: String,
+        val content: String,
+        val contentType: String = "text/plain",
+        val mimeType: String = "text/plain",
+        val timestamp: Long,
+        val isSensitive: Boolean = false,
+        val label: String? = null
+    ) : ServerMessage() {
+        init {
+            require(itemId.isNotBlank()) { "Item ID cannot be blank" }
+            require(content.isNotEmpty()) { "Clipboard content cannot be empty" }
+            require(timestamp > 0) { "Timestamp must be positive" }
+        }
+    }
+
+    /**
+     * Clipboard copy acknowledgment.
+     */
+    @Serializable
+    @SerialName("clipboard_copy_ack")
+    data class ClipboardCopyAck(
+        val itemId: String,
+        val success: Boolean,
+        val message: String? = null
+    ) : ServerMessage()
+
+    /**
+     * Clipboard history response.
+     */
+    @Serializable
+    @SerialName("clipboard_history")
+    data class ClipboardHistory(
+        val items: List<ClipboardHistoryItem>
+    ) : ServerMessage()
 }
+
+/**
+ * Clipboard history item for protocol transmission.
+ */
+@Serializable
+data class ClipboardHistoryItem(
+    val itemId: String,
+    val content: String,
+    val contentType: String,
+    val mimeType: String,
+    val timestamp: Long,
+    val sizeBytes: Int,
+    val isSensitive: Boolean,
+    val label: String? = null
+)
+
 
 /**
  * Client device information.

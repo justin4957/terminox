@@ -2,6 +2,7 @@ package com.terminox.data.local.database
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import com.terminox.data.local.database.dao.ClipboardItemDao
 import com.terminox.data.local.database.dao.ConnectionDao
 import com.terminox.data.local.database.dao.ConnectionEventDao
 import com.terminox.data.local.database.dao.Ec2InstanceDao
@@ -10,6 +11,7 @@ import com.terminox.data.local.database.dao.SnippetCategoryDao
 import com.terminox.data.local.database.dao.SnippetDao
 import com.terminox.data.local.database.dao.SshKeyDao
 import com.terminox.data.local.database.dao.TrustedHostDao
+import com.terminox.data.local.database.entity.ClipboardItemEntity
 import com.terminox.data.local.database.entity.ConnectionEntity
 import com.terminox.data.local.database.entity.ConnectionEventEntity
 import com.terminox.data.local.database.entity.Ec2InstanceEntity
@@ -28,9 +30,10 @@ import com.terminox.data.local.database.entity.TrustedHostEntity
         PairedAgentEntity::class,
         Ec2InstanceEntity::class,
         SnippetEntity::class,
-        SnippetCategoryEntity::class
+        SnippetCategoryEntity::class,
+        ClipboardItemEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -42,4 +45,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun ec2InstanceDao(): Ec2InstanceDao
     abstract fun snippetDao(): SnippetDao
     abstract fun snippetCategoryDao(): SnippetCategoryDao
+    abstract fun clipboardItemDao(): ClipboardItemDao
 }
