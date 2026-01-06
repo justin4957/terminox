@@ -329,9 +329,22 @@ class RemoteSessionTest {
 
     @Test
     fun `RemoteSession equality works correctly`() {
-        val session1 = createTestSession(id = "test-1")
-        val session2 = createTestSession(id = "test-1")
-        val session3 = createTestSession(id = "test-2")
+        val fixedTime = Instant.now().toString()
+        val session1 = createTestSession(
+            id = "test-1",
+            createdAt = fixedTime,
+            lastActivityAt = fixedTime
+        )
+        val session2 = createTestSession(
+            id = "test-1",
+            createdAt = fixedTime,
+            lastActivityAt = fixedTime
+        )
+        val session3 = createTestSession(
+            id = "test-2",
+            createdAt = fixedTime,
+            lastActivityAt = fixedTime
+        )
 
         assertEquals(session1, session2)
         assertNotEquals(session1, session3)
