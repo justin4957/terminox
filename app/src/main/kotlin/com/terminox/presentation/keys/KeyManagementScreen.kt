@@ -24,7 +24,6 @@ import com.terminox.domain.model.SshKey
 import com.terminox.domain.model.SyncStatus
 import com.terminox.domain.model.SyncedKey
 import com.terminox.security.BiometricStatus
-import com.terminox.security.OverlayProtectedView
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -384,9 +383,6 @@ private fun GenerateKeyDialog(
     onGenerate: (name: String, type: KeyType, requireBiometric: Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
-    // Apply overlay protection (AV-13: Overlay Attack Protection)
-    OverlayProtectedView()
-
     var name by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(KeyType.ED25519) }
     var requireBiometric by remember { mutableStateOf(biometricAvailable) }
@@ -490,9 +486,6 @@ private fun ImportKeyDialog(
     onImport: (name: String, privateKey: String, requireBiometric: Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
-    // Apply overlay protection (AV-13: Overlay Attack Protection)
-    OverlayProtectedView()
-
     var name by remember { mutableStateOf("") }
     var privateKey by remember { mutableStateOf("") }
     var requireBiometric by remember { mutableStateOf(biometricAvailable) }
@@ -574,9 +567,6 @@ private fun DeleteKeyConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    // Apply overlay protection (AV-13: Overlay Attack Protection)
-    OverlayProtectedView()
-
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },

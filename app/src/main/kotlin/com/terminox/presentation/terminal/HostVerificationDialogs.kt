@@ -27,12 +27,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.terminox.R
 import com.terminox.domain.model.HostVerificationResult
-import com.terminox.security.OverlayProtectedView
 
 /**
  * Dialog shown when connecting to a new server for the first time.
  * Implements Trust On First Use (TOFU) verification.
- * Protected against overlay attacks (AV-13).
  */
 @Composable
 fun NewHostVerificationDialog(
@@ -40,9 +38,6 @@ fun NewHostVerificationDialog(
     onTrustAndConnect: () -> Unit,
     onReject: () -> Unit
 ) {
-    // Apply overlay protection (AV-13: Overlay Attack Protection)
-    OverlayProtectedView()
-
     AlertDialog(
         onDismissRequest = onReject,
         icon = {
@@ -130,9 +125,6 @@ fun FingerprintChangedDialog(
     onUpdateAndConnect: () -> Unit,
     onReject: () -> Unit
 ) {
-    // Apply overlay protection (AV-13: Overlay Attack Protection)
-    OverlayProtectedView()
-
     AlertDialog(
         onDismissRequest = onReject,
         icon = {
